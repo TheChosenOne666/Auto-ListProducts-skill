@@ -1,0 +1,68 @@
+{
+  "platform": "<short name the user recognises>",
+  "probedAt": "2026-01-01T00:00:00+08:00",
+  "probedBy": "agent",
+  "form": {
+    "newUrl": "<URL that opens an empty create form>",
+    "listUrl": "<URL of the product list>",
+    "loginUrlPattern": "<substring that means 'logged out'>"
+  },
+  "image": {
+    "uploadTrigger": {"by": "role+name", "value": "<upload button label>"},
+    "cropConfirm": {"by": "role+name", "value": "<crop confirm label>"},
+    "thumbLocator": {"by": "css", "value": "<css that matches stored thumbnails>"},
+    "removeLocator": {"by": "css", "value": "<css for the delete icon on a thumbnail>"},
+    "minBytes": 50000
+  },
+  "fields": {
+    "name": {"locator": {"by": "placeholder", "value": "<name input placeholder>"}, "maxLength": 42},
+    "category": {
+      "kind": "cascader",
+      "locator": {"by": "placeholder", "value": "<category field placeholder>"},
+      "panelLocator": {"by": "css", "value": ".el-cascader-menu"},
+      "expectedSeparator": " / ",
+      "note": "read labels per panel, exact match only"
+    },
+    "scope": {
+      "kind": "select",
+      "locator": {"by": "css", "value": "<css of the scope select>"},
+      "options": ["<option A>", "<option B>"],
+      "value": "<option the user wants as default>"
+    },
+    "spec": {
+      "nameLocator": {"by": "placeholder", "value": "<spec name placeholder>"},
+      "valueLocator": {"by": "placeholder", "value": "<spec value placeholder>"},
+      "addValueButton": {"by": "role+name", "value": "<add value button label>"},
+      "skuInputsLocator": {"by": "css", "value": "<css for numeric SKU inputs>"},
+      "skuFieldOrder": ["price", "stock", "points"],
+      "caseSkuLabel": "<how the case row is labelled, e.g. '{per}{unit}*箱'>"
+    },
+    "optional": {
+      "points": {"locator": {"by": "placeholder", "value": "<points input>"}, "decimals": 1},
+      "sales": {"locator": {"by": "placeholder", "value": "<display sales input>"}},
+      "fav": {"locator": {"by": "placeholder", "value": "<display favourite input>"}}
+    },
+    "submit": {
+      "button": {"by": "role+name", "value": "<submit label>"},
+      "confirmButton": {"by": "role+name", "value": "<confirm label>"},
+      "successWhen": "route-changed",
+      "successDetail": "<substring the URL must not contain, e.g. the form route>"
+    }
+  },
+  "defaults": {
+    "stock": null,
+    "specName": "<label the user wants, e.g. 规格>",
+    "rootCategory": "<top-level category name>",
+    "checkedToStart": ["<pre-checked toggles the agent must assert>"]
+  },
+  "business": {
+    "mode": "fill-only",
+    "pointsMode": "none",
+    "minCoupon": 0,
+    "counters": false,
+    "caseSku": true
+  },
+  "notes": [
+    "<anything surprising found while probing: hidden required fields, dialogs, quirks>"
+  ]
+}

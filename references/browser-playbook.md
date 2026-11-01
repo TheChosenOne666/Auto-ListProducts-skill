@@ -1,0 +1,87 @@
+# Browser playbook
+
+Hard-won mechanics for driving an admin backend through a browser-automation agent.
+Selectors below are Element-Plus-style examples; the real names come from `profile.json` written by the probe.
+
+## Before the first click: is the channel actually available?
+
+1. Ask the agent for its browser list and open a tab. An empty list, or a "connector not ready /
+   extension missing / update required" style error, means the user has **no working browser-control
+   bridge** — stop and fix that first:
+   - tell the user which browser connector extension (or companion app) to install,
+   - have them enable it in the browser and connect it,
+   - reopen the browser, then re-run the check.
+   Do not continue against any other surface. A separate in-app/embedded browser that happens to show the
+   same site is a **different session**: not logged in, different cookies, wasted batch.
+2. Prove control end-to-end with a harmless action (list tabs, read the page title, open the admin URL) and
+   confirm the page is the logged-in admin, not a login form.
+3. Confirm OS-level input is available (needed for native file dialogs). Without it, only proceed if the
+   uploader exposes a plain file input that accepts files directly.
+4. Agree the mode for this run: fill-only, or fill-and-submit.
+
+## Ownership and tab hygiene
+
+- Work in **one tab**, the user's own tab. List the user's tabs, claim the store tab, and re-claim it at
+  the start of every round — claim tokens are one-use and expire between turns.
+- Open a **fresh form URL** for every product. Never continue in a half-filled form.
+- Before ending a round with a pending review, mark the tab as handoff. Agent-created tabs auto-close at
+  turn end; an unmarked tab will take the filled form with it.
+- Avoid creating new tabs per round. Do not repeatedly activate the window: activation/snapshot calls can
+  unmaximize or minimize it. Snapshot without activating when possible; restore size once at the end
+  (`Alt+Space`, then `x`).
+
+## Uploads: real clicks only
+
+Synthetic clicks (dispatched through the debugger) are captured by the file-chooser interceptor, the
+native dialog never appears, and `setFiles` is refused. The working recipe:
+
+1. Snapshot the browser window with accessibility text.
+2. Find the upload tile by its button label (`批量上传`, `更换图片`, …) in the tree; note its element index.
+3. Click it **by element index** (a real input event).
+4. Wait for the OS "Open" window, then read its focused element.
+5. `set_value` the filename edit with the exact file name (Chinese is fine; avoid typing — characters drop),
+   then press `Return`.
+6. Wait for the crop dialog, wait for the image to actually render, then click the confirm button
+   (`裁剪并上传`).
+
+After the upload completes, verify the stored object: read the thumbnail's `src` and fetch it.
+A white crop compresses to ~10 KB; anything under ~50 KB means the crop was blank — delete the thumbnail
+(`.remove-btn`) and retry, at most twice, then abort the item.
+
+If no OS dialog ever appears, the chooser interceptor is stuck: reset the browser agent, recreate it, and
+re-claim (or reopen) the tab.
+
+## Category cascader
+
+- Click the field once to open; if it is already open, clicking again closes it — check visibility first.
+- Read labels **per panel** (`.el-cascader-menu` nth), never as one flat list: level-1 and level-2 share
+  many strings and a flat search will click the wrong node.
+- Click by **exact trimmed text** and assert the resulting path string afterwards.
+  A contains-match can silently land on a sibling (`Tea (brand direct)` vs `Tea`).
+- Category names are data, not guesses: dump the tree per level, store it in `categories.json`, and
+  re-dump whenever the platform adds nodes.
+
+## Selects and toggles
+
+- Click the select, then click the option by exact text; retry the whole open→pick cycle up to three
+  times and assert the rendered value before moving on.
+- Defaults (payment types, banner checkbox, commission) are usually pre-checked; assert the count
+  instead of clicking them.
+
+## Spec matrix and SKU rows
+
+- One spec name, several values: type the first value, click `+增加规格值`, type the next.
+- SKU rows appear in value order. Fill the numeric inputs by index (price, stock, points per row) and
+  read all of them back before submitting; do not use the bulk-fill widget when rows differ.
+
+## Submit and resume
+
+- Click submit, accept the confirmation dialog, then assert the route left the form page.
+- Persist the queue index after each success (`state.json`) so a crash resumes cleanly.
+- Stop the batch on the first failed assertion and report the item; never "fix it by clicking anyway".
+
+## Session and safety
+
+- Session expiry shows up as a redirect to a login route. Hand the tab to the user, wait for their word,
+  then re-claim and continue. Never type credentials.
+- Do not tamper with the page to bypass uploads, review, or anti-bot checks.

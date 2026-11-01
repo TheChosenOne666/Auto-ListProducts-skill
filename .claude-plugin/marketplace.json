@@ -1,0 +1,25 @@
+{
+  "name": "auto-list-products",
+  "description": "Discovery-first product listing for any web admin backend: probe the form once, then crop, fill, verify and submit a batch.",
+  "owner": {
+    "name": "TheChosenOne666",
+    "email": "TheChosenOne666@users.noreply.github.com"
+  },
+  "plugins": [
+    {
+      "name": "auto-list-products",
+      "description": "Bulk product listing skill: environment preflight, platform probe to profile.json, square crops with blank/dot guards, resumable queue, browser form filling with per-field verification before submit.",
+      "version": "0.1.0",
+      "source": "./",
+      "skills": ["./skills/auto-list-products"],
+      "author": {
+        "name": "TheChosenOne666",
+        "email": "TheChosenOne666@users.noreply.github.com"
+      },
+      "homepage": "https://github.com/TheChosenOne666/Auto-ListProducts",
+      "repository": "https://github.com/TheChosenOne666/Auto-ListProducts",
+      "license": "MIT",
+      "keywords": ["skills", "ecommerce", "product-listing", "browser-automation", "spreadsheet"]
+    }
+  ]
+}

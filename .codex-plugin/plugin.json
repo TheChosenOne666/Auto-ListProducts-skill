@@ -1,0 +1,33 @@
+{
+  "name": "auto-list-products",
+  "version": "0.1.0",
+  "description": "Discovery-first product listing for any web admin backend: probe the form once, then crop, fill, verify and submit a batch.",
+  "author": {
+    "name": "TheChosenOne666",
+    "url": "https://github.com/TheChosenOne666"
+  },
+  "homepage": "https://github.com/TheChosenOne666/Auto-ListProducts",
+  "repository": "https://github.com/TheChosenOne666/Auto-ListProducts",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "ecommerce",
+    "product-listing",
+    "browser-automation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Auto List Products",
+    "shortDescription": "Bulk-list products on any admin backend.",
+    "longDescription": "Auto-List-Products probes your own admin form once, writes a platform profile, then runs a resumable listing queue: square image crops with blank and carousel-dot guards, fact extraction, optional registration sheet, browser form filling with per-field verification, and an audit pass.",
+    "developerName": "TheChosenOne666",
+    "category": "Productivity",
+    "capabilities": [],
+    "websiteURL": "https://github.com/TheChosenOne666/Auto-ListProducts",
+    "defaultPrompt": [
+      "Probe my store admin's create form and prepare it for bulk listing.",
+      "Crop these product screenshots and build a listing queue.",
+      "Audit the products I just submitted for blank images and duplicates."
+    ]
+  }
+}

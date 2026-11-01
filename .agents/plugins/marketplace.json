@@ -1,0 +1,21 @@
+{
+  "name": "auto-list-products",
+  "interface": {
+    "displayName": "Auto List Products"
+  },
+  "plugins": [
+    {
+      "name": "auto-list-products",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/TheChosenOne666/Auto-ListProducts.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -40,6 +40,27 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
 
+      - name: Plugin manifests parse
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          bad = 0
+          for path in [".claude-plugin/marketplace.json", ".codex-plugin/plugin.json", ".agents/plugins/marketplace.json"]:
+              try:
+                  data = json.loads(Path(path).read_text(encoding="utf-8"))
+              except Exception as exc:
+                  print(f"FAIL {path}: {exc}"); bad += 1; continue
+              if data.get("name") != "auto-list-products":
+                  print(f"FAIL {path}: name is {data.get('name')!r}"); bad += 1
+              print(f"ok {path}")
+          claude = json.loads(Path(".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+          skills = claude["plugins"][0].get("skills", [])
+          if "./skills/auto-list-products" not in skills:
+              print(f"FAIL claude marketplace skills: {skills}"); bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+
       - name: Scripts compile
         run: python -m py_compile skills/auto-list-products/scripts/*.py
 

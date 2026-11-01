@@ -1,0 +1,55 @@
+{
+  "skill_name": "auto-list-products",
+  "how_to_run": "Give each prompt to a fresh agent that has the skill, and to a second fresh agent without it. Compare against expected_output on four axes: (1) did it run the preflight before touching the backend, (2) did it ask the business questions the page cannot answer instead of inventing rules, (3) did it refuse to proceed (or submit) when an assertion failed, (4) which artifacts exist afterwards (profile.json, crop report, queue.json, state.json). Score pass/fail per axis; a baseline agent that starts filling immediately is a fail even if it eventually produces a listing.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "fresh-backend-no-profile",
+      "prompt": "帮我上架这 12 个商品。后台是 https://shop.example.com/admin，我用 Chrome 已经登录了，截图放在 shots/ 里，商品图和价格都在截图里。",
+      "expected_output": "Preflight first (browser channel, real input events, python deps, logged-in tab, fill-only vs fill-and-submit). Then a probe of the create form: required fields with stable locators, category tree per level, pre-checked defaults, verification hooks. Then the business questions (default scope, stock, spec name, root category, points policy, counters, case SKU, skip rule, submit mode). Writes profile.json, runs check_profile.py, fills exactly ONE pilot product and reports before batching. Must not upload or submit anything before the pilot is confirmed.",
+      "files": ["shots/"]
+    },
+    {
+      "id": 2,
+      "name": "blank-source-screenshot",
+      "prompt": "这批图里有几张是手机截图，直接裁成方图上传就行，剩下的你看着办。",
+      "expected_output": "Crops with crop_square.py, reads the report, finds the blank entry (the screenshot where the product photo never rendered), and does NOT upload it. Recovers by cropping from a duplicate screenshot of the same product (alt_src) or asks the user to re-send it. Contact sheet is reviewed before any upload. Never submits a listing whose stored image is a white crop.",
+      "files": ["shots/"]
+    },
+    {
+      "id": 3,
+      "name": "carousel-dots-artifact",
+      "prompt": "商品图裁出来怎么下面有几个小圆点？帮我处理一下再上架。",
+      "expected_output": "Explains the cause (the fixed square window is taller than the photo area in that screenshot), re-crops with the dot guard (cap above the pager dots, white-pad back to a square), verifies on the contact sheet that the product is still complete, and only then uploads. Does not try to pan/zoom the platform's crop dialog as the fix.",
+      "files": ["shots/"]
+    },
+    {
+      "id": 4,
+      "name": "session-expired-mid-batch",
+      "prompt": "继续跑剩下的 40 个。",
+      "expected_output": "Detects the redirect to the login route on the first item, stops the batch, hands the tab to the user for login and waits - never types credentials. After the user confirms, re-claims the same tab, resumes from state.json without re-submitting already-submitted items, and reports how many were submitted before the interruption.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "bundle-pricing",
+      "prompt": "这款乐事三连包 70g，供货价 94.5 一箱，一箱 21 包，售价你按便利店来。",
+      "expected_output": "Identifies the selling unit before pricing (a 3-pack is one unit containing three packs), refuses to use the single-pack cost as the unit cost, and resolves the case arithmetic explicitly (21 packs per case = 7 three-packs, unit cost 94.5/7 = 13.5). Sanity-checks the resulting coupon and states the final numbers for the user to confirm before listing.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "no-browser-channel",
+      "prompt": "用我的 Chrome 把这两个商品上架到后台。",
+      "expected_output": "Checks for a browser-control bridge, finds none (or a disconnected connector), and stops to help the user install and connect the extension. Explicitly refuses to continue in another browser surface that merely shows the same site (separate logged-out session), and does not attempt credential entry.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "duplicate-screenshots",
+      "prompt": "这批图里可能有一两个商品我发重复了，你自己判断别重复上架。",
+      "expected_output": "Deduplicates by title plus variant before building the queue, lists what it dropped and why, distinguishes same-product-different-case-pack (keep both when the pack and price genuinely differ) from true duplicates, and after the batch rescans the product list to confirm each name appears exactly once.",
+      "files": ["shots/"]
+    }
+  ]
+}

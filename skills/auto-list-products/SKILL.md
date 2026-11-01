@@ -1,6 +1,12 @@
 ---
 name: auto-list-products
-description: Discovery-first bulk product listing for any web admin backend. Use when the user wants to 批量上架商品 / 自动填上架表单 / 把商品截图批量发布到商城后台, or to make an existing listing workflow work on a new platform. The agent first probes the user's own admin form and writes a platform profile (fields, category tree, defaults, verification hooks), then runs a resumable queue: square image crops with blank/dot guards, fact extraction, optional registration sheet, browser filling, per-field verification, submit, audit.
+description: >-
+  Discovery-first bulk product listing for any web admin backend. Use when the user wants to 批量上架商品 /
+  自动填上架表单 / 把商品截图批量发布到商城后台, or to make an existing listing workflow work on a new
+  platform. The agent probes the user's own admin form and writes a platform profile (fields, category
+  tree, defaults, verification hooks), then runs a resumable queue: square image crops with blank and dot
+  guards, fact extraction, optional registration sheet, browser filling, per-field verification, submit,
+  audit.
 ---
 
 # Auto List Products

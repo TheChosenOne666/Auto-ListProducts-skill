@@ -1,0 +1,84 @@
+name: Check skills
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml pillow openpyxl
+
+      - name: Frontmatter parses and has the required keys
+        run: |
+          python - <<'PY'
+          import sys, yaml
+          from pathlib import Path
+          bad = 0
+          for path in sorted(Path("skills").glob("*/SKILL.md")):
+              text = path.read_text(encoding="utf-8")
+              if not text.startswith("---"):
+                  print(f"FAIL {path}: no frontmatter"); bad += 1; continue
+              _, fm, _ = text.split("---", 2)
+              data = yaml.safe_load(fm) or {}
+              name = data.get("name", "")
+              desc = data.get("description", "") or ""
+              if name != path.parent.name:
+                  print(f"FAIL {path}: name {name!r} != folder {path.parent.name!r}"); bad += 1
+              if not desc or len(desc) > 1024:
+                  print(f"FAIL {path}: description missing or > 1024 chars"); bad += 1
+              print(f"ok {path} ({name}, {len(desc)} chars)")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Scripts compile
+        run: python -m py_compile skills/auto-list-products/scripts/*.py
+
+      - name: Example profile validates
+        run: python skills/auto-list-products/scripts/check_profile.py skills/auto-list-products/profile.example.json
+
+      - name: Evals parse
+        run: |
+          python - <<'PY'
+          import glob, json, sys
+          for path in glob.glob("skills/*/evals/evals.json"):
+              data = json.load(open(path, encoding="utf-8"))
+              assert data["skill_name"] and data["evals"], path
+              for e in data["evals"]:
+                  assert e["id"] and e["prompt"] and e["expected_output"], path
+          print("evals ok")
+          PY
+
+      - name: No TODOs left
+        run: |
+          if grep -rn "TODO" --include="*.md" --include="*.py" --include="*.json" --include="*.sh" .; then
+            echo "remove TODOs before merging"; exit 1
+          fi
+          echo "no TODOs"
+
+      - name: Text files are clean UTF-8
+        run: |
+          python - <<'PY'
+          import glob, sys
+          bad = 0
+          for path in glob.glob("**/*", recursive=True):
+              if path.startswith(".git/") or not path.endswith((".md", ".py", ".json", ".sh", ".yml", ".yaml")):
+                  continue
+              raw = open(path, "rb").read()
+              try:
+                  text = raw.decode("utf-8")
+              except UnicodeDecodeError as exc:
+                  print(f"FAIL {path}: not UTF-8 ({exc})"); bad += 1; continue
+              if text.count("\ufffd"):
+                  print(f"FAIL {path}: replacement characters (double encoding)"); bad += 1
+          sys.exit(1 if bad else 0)
+          PY

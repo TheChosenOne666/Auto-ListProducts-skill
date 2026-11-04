@@ -1,6 +1,6 @@
 {
   "name": "auto-list-products",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Discovery-first product listing for any web admin backend: probe the form once, then crop, fill, verify and submit a batch.",
   "author": {
     "name": "TheChosenOne666",

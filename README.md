@@ -55,10 +55,21 @@ skills/auto-list-products/
 ├── listings.example.json          商品列表快照的形状（对账的输入）
 ├── references/                    探测清单、浏览器手法、踩坑清单
 ├── scripts/                       七个可执行脚本（零 SDK 依赖）
-└── evals/evals.json               验收用例：带 skill / 不带 skill 对比
+└── evals/                         验收用例、执行手册 run-book、真实对照结果 results/
+sandbox/admin.html                 本地练习沙盒：假后台，可完整走一遍流程，坑全部写在 sandbox/README.md
 tests/smoke.py                     端到端冒烟测试：造夹具→跑七个脚本→断言产物
-.github/workflows/check-skills.yml 结构自检 + 冒烟测试，Linux 与 Windows 各跑一遍
+tests/sandbox_static.py            沙盒静态检查：不联网、种子确定、快照形状与文档一致、埋坑与文档对得上
+.github/workflows/check-skills.yml 结构自检 + 冒烟 + 沙盒检查，Linux 与 Windows 各跑一遍
 ```
+
+## 没有真实后台，也能先练一遍
+
+`sandbox/admin.html` 是一个零依赖的本地假后台（单文件，双击或 `python -m http.server` 打开）：
+三级类目里故意放了同名节点、有一列不标必填但拦住提交、库存是预填默认值、提交有二次确认、
+列表底部就是可直接抄成 `listings.json` 的快照。种子数据确定，随时可重置。
+
+它存在的目的不只是练习：`evals/run-book.md` 用它把「带 skill / 不带 skill」的对照变成**能真跑的实验**，
+结果落在 `skills/auto-list-products/evals/results/`，包括这套办法证明不了什么。
 
 ## 为什么是 skill，不是平台
 

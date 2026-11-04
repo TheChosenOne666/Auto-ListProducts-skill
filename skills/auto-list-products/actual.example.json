@@ -22,7 +22,7 @@
     "specValues keeps the on-form order: the unit row has to come before the case row, because rows can only be appended.",
     "skuRows may also be arrays ([3.0, 10000, 0.8]) and are then keyed by profile fields.spec.skuFieldOrder.",
     "images[].bytes is the size of the STORED object fetched back from the thumbnail URL, not the local file size - a white crop compresses to a few KB and that is how it gets caught.",
-    "checked is how many controls are ticked on the form, asserted against profile.defaults.checkedToStart rather than clicked blind.",
+    "checked is how many FORM-LEVEL controls are ticked (payment types, banner, commission inheritance), asserted against profile.defaults.checkedToStart. Do not count SKU-row toggles here: the row count changes per product, so a row-dependent number against a fixed expectation is a false block. Row toggles belong in skuRows[].listed.",
     "submitted is what the page state says, not what the agent intended: in fill-only mode a true here is an out-of-mode failure.",
     "category is compared segment by segment, so the page may render 'RootCat > 饮料 > 茶饮料' while the plan spells it with ' / ' - the levels themselves still have to match exactly.",
     "for a product with real variants (colours, sizes), declare them all in the queue item's specValues: the gate then blocks any value the plan lacks and checks the rows by name. Otherwise an undeclared extra row blocks the submit unless the run passes --allow-extra-specs."

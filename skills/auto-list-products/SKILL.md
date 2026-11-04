@@ -46,6 +46,11 @@ python -c "import PIL, openpyxl; print('ok')" || pip install pillow openpyxl
 - the tab must be logged in; if a login page appears, hand the tab to the user (never type credentials);
 - agree the mode for this run: `fill-only` or `fill-and-submit`. Do not switch on your own.
 
+No backend to rehearse against yet? The repository ships `sandbox/admin.html` - a local, offline, zero-dependency
+practice form with the same shapes this skill exists to handle (a required column with no asterisk, category
+nodes that share a label, pre-filled defaults, a confirm dialog, a list snapshot in the documented shape).
+Run the whole chain there first; `sandbox/README.md` lists every trap it plants.
+
 ## Phase 1 — Probe the platform, write the profile
 
 Do this once per backend (and again after the admin UI changes). Read
@@ -151,7 +156,10 @@ Follow `references/browser-playbook.md`, driven by `profile.json`. Per product:
 
    It checks name, the exact category path, scope, spec name, spec-value order, SKU row count, price,
    stock and points per row, display counters, every required upload slot against `image.minBytes`, the
-   pre-checked control count, and the agreed submit mode. Exit 1 means **do not submit** - abort the item,
+   pre-checked control count, and the agreed submit mode. Every column named in
+   `fields.spec.skuFieldOrder` must carry a value on every row - a page refuses an empty weight as firmly as
+   an empty price, and a gate that only checks the columns it happens to know about is what let a real run
+   pass the gate and then get rejected by the form. Exit 1 means **do not submit** - abort the item,
    keep the verdict, report it; never "click anyway because it looks right".
 
    The gate refuses to bless what it did not compare: a form holding a spec value the queue item never

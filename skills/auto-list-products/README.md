@@ -74,6 +74,10 @@ misbehaves fails the build on the platform the operator actually uses.
 - A browser the agent can control (a connector/extension bridge to the user's own browser), with real
   input events available for native file dialogs.
 - No API keys. No installs beyond the two Python packages.
+- No store to practise on? The repository ships `sandbox/admin.html` - an offline, zero-dependency practice
+  back office with the same shapes this skill handles (an unmarked required column, category nodes sharing a
+  label, pre-filled defaults, a confirm step, a list snapshot in the documented shape). Its README lists every
+  trap it plants; `evals/run-book.md` uses it to run the with/without comparison.
 
 ## Install
 

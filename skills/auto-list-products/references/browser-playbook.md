@@ -99,7 +99,10 @@ Fill is not verified by remembering what you typed - it is verified by reading t
 - `bytes` for every upload slot: fetch the thumbnail's stored URL and take that length. The local file size is
   not evidence - the platform re-encodes, and a white crop compresses to a few KB exactly the same way in and
   out of the page;
-- how many controls are ticked, compared against what the probe recorded rather than re-clicked;
+- how many **form-level** controls are ticked (payment types, banner, commission inheritance), counted against
+  what the probe recorded rather than re-clicked. SKU-row toggles do not belong in this number - the row count
+  varies per product, so a row-dependent count against a fixed expectation is a false block; keep them in
+  `skuRows[].listed`.
 - `submitted`: the page's actual state. In `fill-only` mode a true here is an out-of-mode failure, and that is
   the one rule worth hard-blocking on.
 

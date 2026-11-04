@@ -1,0 +1,35 @@
+[
+  {
+    "n": 1,
+    "name": "示例多色商品",
+    "variants": [
+      {"label": "黑蓝红色", "src": "a-1.jpg"},
+      {"label": "黑白色", "src": "a-2.jpg"},
+      {"label": "米绿色", "src": "a-3.jpg"}
+    ],
+    "scenes": ["scene-1.jpg", "scene-2.jpg"],
+    "infographic": "a-info.jpg"
+  },
+  {
+    "n": 2,
+    "name": "示例单图商品",
+    "single": "only.jpg"
+  },
+  {
+    "n": 3,
+    "name": "示例手工排位的商品",
+    "variants": [{"label": "红", "src": "c-1.jpg"}],
+    "scenes": ["scene-1.jpg"],
+    "trays": {"main": ["c-1.jpg", "scene-1.jpg"], "detail": null}
+  },
+  {
+    "_notes": [
+      "This is the plan prepare_images.py lays into the backend's upload slots; slot counts and crop rules come from profile.image.trays, never from this file.",
+      "variants[] is what the per-SKU slot binds to: each entry needs a label (shown in the SKU row) and a src file.",
+      "main fills with variants first then scenes; detail puts the infographic first when the plan names one, then variants, then scenes. Both are truncated to the tray's maxCount.",
+      "trays.<key> given explicitly (even as null) overrides the automatic order for that slot - use it when the user says which images go where.",
+      "single means one image, nothing added: no padding, no repeats, no invented slots.",
+      "A short set is reported as short with the missing count and never filled by repeating an image; the same file twice in one slot group is an error."
+    ]
+  }
+]

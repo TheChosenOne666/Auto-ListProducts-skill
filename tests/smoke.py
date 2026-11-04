@@ -971,6 +971,225 @@ def test_boards(tmp: Path) -> None:
     check(res.returncode == 2 and "unknown --board" in res.stderr, "the gate refuses an unknown board")
 
 
+def test_prepare_images(tmp: Path) -> None:
+    folder = tmp / "assets"
+    src = folder / "src"
+    src.mkdir(parents=True, exist_ok=True)
+
+    def pattern(w: int, h: int) -> Image.Image:
+        im = Image.new("RGB", (w, h))
+        px = im.load()
+        for y in range(h):
+            for x in range(w):
+                px[x, y] = ((x * 3 + y * 5) % 251, (x * 7 + y * 11) % 249, (x * 13 + y * 17) % 243)
+        return im
+
+    def save(name: str, w: int, h: int, blank=False) -> str:
+        im = Image.new("RGB", (w, h), "white") if blank else pattern(w, h)
+        im.save(src / name)
+        return name
+
+    variants = [save("a-1.jpg", 800, 800), save("a-2.jpg", 800, 800), save("a-3.jpg", 800, 800)]
+    scenes = [save("scene-1.jpg", 1200, 900), save("scene-2.jpg", 1200, 900)]
+    info = save("a-info.jpg", 768, 1024)
+    small = save("small.jpg", 300, 300)
+    save("tiny.jpg", 400, 400)
+    white = save("white.jpg", 800, 800, blank=True)
+
+    prof = tmp / "profile.json"
+    prof.write_text(json.dumps(vprofile(), ensure_ascii=False), encoding="utf-8")
+
+    def plan(*items) -> Path:
+        path = tmp / "plan.json"
+        body = [i for i in items if i]
+        path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def run_prep(dst: str, products_path: Path, *extra, prof_path=None, edge="640"):
+        cmd = [sys.executable, str(SCRIPTS / "prepare_images.py"), "--profile", prof_path or prof,
+               "--products", products_path, "--src", src, "--dst", folder / dst,
+               "--edge", str(edge), *extra]
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+    def manifest_of(dst: str, products_path: Path, *extra, prof_path=None) -> tuple[int, str, list]:
+        res = run_prep(dst, products_path, "--manifest", folder / f"{dst}-manifest.json", *extra,
+                       prof_path=prof_path)
+        path = folder / f"{dst}-manifest.json"
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+        # stderr is folded in: refusals are written there, and the checks below care about both
+        return res.returncode, (res.stdout or "") + (res.stderr or ""), data
+
+    # 1. variants then scenes fill the main slots; detail keeps its own order and is never cropped
+    full = plan({"n": 1, "name": "多色商品",
+                 "variants": [{"label": f"色{i}", "src": v} for i, v in enumerate(variants)],
+                 "scenes": scenes, "infographic": info})
+    rc, out, man = manifest_of("m1", full)
+    entry = man[0]
+    check(rc == 0 and len(entry["main"]) == 5, "five main slots filled from three variants plus two scenes")
+    check(all(row["w"] == row["h"] for row in entry["main"]), "every main slot came out square")
+    check(all(row["action"].startswith("center-crop") for row in entry["main"]),
+          "anything larger than the target edge is centre-cropped, never padded")
+    check(entry["main"][3]["src"] == scenes[0], "scenes fill the slots the variants leave over")
+    check(entry["main"][0]["src"] == variants[0], "variants lead the main slots")
+    check(entry["detail"][0]["src"] == info and "infographic first" in entry["detail_reason"],
+          "the named infographic leads the detail slots, and the reason is recorded")
+    check(all(row["action"] == "keep" for row in entry["detail"]),
+          "the any-ratio tray uploads as-is, nothing cropped")
+    check(entry["detail"][0]["w"] == 768 and entry["detail"][0]["h"] == 1024,
+          "a 3:4 infographic keeps 3:4 in the detail tray")
+    check(len(entry["detail"]) == 5, "the detail tray is truncated to its slot count")
+    check(set(entry["skuImages"]) == {"色0", "色1", "色2"}, "the per-SKU slot binds one image per variant label")
+    check(not entry["short"] and not entry["suspect"], "a complete plan reports no shortfall")
+
+    # 2. the centre crop really takes the middle of the source, not a padded frame.
+    # a smooth gradient is used here on purpose: on a high-frequency pattern JPEG noise alone is ~50,
+    # which would make any tight threshold meaningless
+    gradient = Image.new("RGB", (1200, 900))
+    gpx = gradient.load()
+    for gy in range(900):
+        for gx in range(1200):
+            gpx[gx, gy] = (gx % 256, gy % 256, (gx + gy) % 256)
+    gradient.save(src / "grad.jpg", quality=95)
+    crop_plan = plan({"n": 20, "name": "裁切检查", "scenes": ["grad.jpg"]})
+    rc, out, man = manifest_of("m20", crop_plan, "--edge", "900")
+    produced = man[0]["main"][0]
+    check(produced["action"] == "center-crop" and produced["w"] == 900 and produced["h"] == 900,
+          "a 1200x900 scene becomes a 900x900 centre crop at edge 900")
+    with Image.open(src / "grad.jpg") as raw:
+        expected = raw.convert("RGB").crop((150, 0, 1050, 900))
+    with Image.open(folder / "m20" / produced["file"]) as made:
+        made = made.convert("RGB")
+        corners = [(0, 0), (made.width - 1, 0), (0, made.height - 1), (made.width - 1, made.height - 1)]
+        close = all(sum(abs(a - b) for a, b in zip(made.getpixel(xy), expected.getpixel(xy))) < 30
+                    for xy in corners)
+        flat = len({made.getpixel(xy) for xy in corners}) == 1
+        all_white = all(min(made.getpixel(xy)) > 250 for xy in corners)
+        check(made.size == expected.size and close and not flat and not all_white,
+              "the output is the centre of the source, not a padded frame with fill-colour corners")
+
+    # 3. never upscale
+    small_plan = plan({"n": 2, "name": "小图商品", "variants": [{"label": "小", "src": small}]})
+    rc, out, man = manifest_of("m2", small_plan)
+    check(man[0]["main"][0]["w"] == 300 and man[0]["main"][0].get("note") == "not-upscaled",
+          "a 300px source stays 300px instead of being blown up to the target edge")
+
+    # 4. a short set is reported, never filled with repeats
+    short_plan = plan({"n": 3, "name": "缺图商品",
+                       "variants": [{"label": "红", "src": variants[0]}, {"label": "蓝", "src": variants[1]}],
+                       "scenes": [scenes[0]]})
+    rc, out, man = manifest_of("m3", short_plan)
+    check(rc == 1 and man[0]["short"] and man[0]["short"][0]["missing"] == 2,
+          "two variants plus one scene against five slots reports the shortfall instead of inventing")
+    check("not filling with repeats" in out, "the report says it refused to repeat an image")
+
+    # 5. the same file twice in one slot group is an error
+    dup_plan = plan({"n": 4, "name": "重复图", "variants": [{"label": "红", "src": variants[0]},
+                                                          {"label": "红2", "src": variants[0]}]})
+    rc, out, man = manifest_of("m4", dup_plan)
+    check(rc == 2 and "used twice" in out, "using one file twice in a slot group is refused")
+
+    # 6. a missing source file is refused, not skipped
+    missing_plan = plan({"n": 5, "name": "缺文件", "variants": [{"label": "红", "src": "nope.jpg"}]})
+    rc, out, man = manifest_of("m5", missing_plan)
+    check(rc == 2 and "missing source file nope.jpg" in out, "a missing source names the file and exits 2")
+
+    # 7. a blank asset is flagged through the byte and colour floor
+    white_plan = plan({"n": 6, "name": "白图商品", "variants": [{"label": "白", "src": white}]})
+    rc, out, man = manifest_of("m6", white_plan)
+    check(rc == 1 and "SUSPECT" in out and man[0]["suspect"], "a white asset is marked suspect, not shipped silently")
+
+    # 8. an explicit order from the plan wins over the rule
+    explicit_plan = plan({"n": 7, "name": "手工排位",
+                          "variants": [{"label": "红", "src": variants[0]}], "scenes": scenes,
+                          "trays": {"main": [scenes[1], variants[0], scenes[0]], "detail": None}})
+    rc, out, man = manifest_of("m7", explicit_plan)
+    check([r["src"] for r in man[0]["main"]] == [scenes[1], variants[0], scenes[0]]
+          and "explicit order" in man[0]["main_reason"],
+          "when the user says which images go where, that order is used and recorded as the reason")
+
+    # 9. a single-image product gets one image and nothing else
+    single_plan = plan({"n": 8, "name": "单图", "single": "tiny.jpg"})
+    rc, out, man = manifest_of("m8", single_plan)
+    check(len(man[0]["main"]) == 1 and "single-image product" in man[0]["main_reason"],
+          "one image, nothing added, and the reason says so")
+
+    # 10. idempotent, and the example plan documents the fields
+    _, _, again = manifest_of("m8b", single_plan)
+    check(man[0]["main"] == again[0]["main"], "the same plan produces the same manifest")
+    example = json.loads((ROOT / "skills" / "auto-list-products" / "products-images.example.json").read_text(encoding="utf-8"))
+    check({"variants", "scenes", "infographic"} <= set(example[0]) and "single" in example[1]
+          and "trays" in example[2], "products-images.example.json documents every field the script reads")
+    source = (SCRIPTS / "prepare_images.py").read_text(encoding="utf-8")
+    check(not any(tok in source for tok in ("urllib", "socket", "requests", "http.client")),
+          "prepare_images works on local files only - no network module in the source")
+
+
+    # 11. regressions a cross-review found: the silent-successes family
+    def tray(key, crop="square", maxc=3, bind="product"):
+        return {"key": key, "label": key, "bind": bind, "crop": crop, "maxCount": maxc,
+                "uploadTrigger": {"by": "css", "value": "#" + key},
+                "thumbLocator": {"by": "css", "value": ".t"}, "removeLocator": {"by": "css", "value": ".r"}}
+
+    def profile_with(trays) -> Path:
+        path = tmp / "profile-trays.json"
+        # minBytes is set low here on purpose: these cases are about slot shape, not about the white-image floor
+        path.write_text(json.dumps({"platform": "t", "image": {"minBytes": 1000, "trays": trays},
+                                    "fields": {}, "defaults": {}, "business": {}}, ensure_ascii=False),
+                        encoding="utf-8")
+        return path
+
+    def run_with(p_path, items, dst, *extra):
+        plan_path = plan(*items)
+        return manifest_of(dst, plan_path, *extra, prof_path=p_path)
+
+    empty_prof = profile_with([tray("main", maxc=3)])
+    rc, out, man = run_with(empty_prof, [{"n": 1, "name": "啥也没有"}], "r1")
+    check(rc == 1 and "every slot filled" not in out and man[0]["main"] == []
+          and man[0]["short"][0]["missing"] == 3,
+          "a product with no candidates is a shortfall, not a silent skip that says every slot is full")
+    rc, out, man = run_with(empty_prof, [{"n": 1, "name": "空列表", "trays": {"main": []}}], "r2")
+    check(rc == 1 and man[0]["short"], "an explicitly empty slot list is still reported as short")
+
+    named_prof = profile_with([tray("主图", maxc=1)])
+    rc, out, man = run_with(named_prof, [{"n": 1, "name": "单图", "single": small}], "r3")
+    check(rc == 0 and len(man[0]["主图"]) == 1,
+          "a single-image product fills the first product-level slot whatever the platform calls it")
+
+    rc, out, man = run_with(profile_with([tray("main", maxc=3)]),
+                            [{"n": 9, "name": "甲", "single": small}, {"n": 9, "name": "乙", "single": info}], "r4")
+    check(rc == 2 and "duplicate product numbers" in out and man is None,
+          "two products sharing a number are refused - their files would overwrite each other")
+    check(not list((folder / "r4").glob("*.jpg")) if (folder / "r4").exists() else True,
+          "a refused run writes no images")
+
+    for label, trays in (("maxCount", [{k: v for k, v in tray("main").items() if k != "maxCount"}]),
+                         ("reserved-key", [tray("short")]),
+                         ("duplicate-key", [tray("main"), tray("main", crop="any")]),
+                         ("bad-crop", [tray("main", crop="roundish")])):
+        rc, out, man = run_with(profile_with(trays), [{"n": 1, "name": "档案", "single": small}], f"bad-{label}")
+        check(rc == 2, f"a tray with a bad definition ({label}) is refused before anything is written")
+
+    rc, out, man = run_with(profile_with([tray("规格图", maxc=5, bind="sku")]),
+                            [{"n": 1, "name": "无标签", "variants": [{"src": small}]}], "r5")
+    check(rc == 2 and "no label" in out, "a variant without a label is refused, not silently unbound")
+
+    Image.new("RGB", (600, 800), (30, 60, 90)).save(src / "tall.jpg")
+    rc, out, man = run_with(profile_with([tray("main", maxc=1)]),
+                            [{"n": 1, "name": "非方小图", "scenes": ["tall.jpg"]}], "r6")
+    check(man[0]["main"][0]["w"] == 600 and man[0]["main"][0].get("note") == "not-upscaled",
+          "any output smaller than the requested edge says it was not upscaled, cropped or not")
+
+    rc, out, man = run_with(profile_with([tray("规格图", maxc=3, bind="sku")]),
+                            [{"n": 1, "name": "怪标签", "variants": [{"label": "黑\n蓝", "src": small}]}], "r7")
+    bound = list(man[0]["skuImages"].items()) if man else []
+    check(rc == 0 and bound and "\n" not in bound[0][1]["file"] and bound[0][0] == "黑\n蓝",
+          "a control character is sanitised in the filename while the label stays verbatim for the SKU row")
+
+    rc, out, man = run_with(empty_prof, [{"n": 1, "name": "啥也没有"}], "r8", "--sheet", str(folder / "r8-sheet.jpg"))
+    check("contact sheet:" not in out and not (folder / "r8-sheet.jpg").exists(),
+          "no contact sheet is announced when there is nothing to put on it")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -982,6 +1201,7 @@ def main() -> int:
         test_reconcile(tmp)
         test_verify(tmp)
         test_boards(tmp)
+        test_prepare_images(tmp)
     if failures:
         print(f"\n{len(failures)} smoke failures:")
         for f in failures:

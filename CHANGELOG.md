@@ -35,6 +35,8 @@ Added / fixed:
 - References: tray inventory in the probe checklist (now 11 steps), tray-driven upload loop, plus catalogue
   entries for blank crops written to disk, extensions lying about format, a submit that silently does
   nothing, reviewed listings that refuse to save, and a queue drifting from the profile.
+- The repository was renamed upstream: install command, plugin manifests and the git remote now all point at
+  `https://github.com/TheChosenOne666/Auto-ListProducts-skill`.
 - Evals: nine briefs, adding a second-platform run and a no-supply sheet row.
 - `tests/smoke.py`: builds screenshots, a profile and a workbook, runs all five scripts and asserts on the
   artifacts. CI runs the whole suite on Linux **and** Windows.

@@ -22,7 +22,7 @@
 ## 安装
 
 ```bash
-npx skills add https://github.com/TheChosenOne666/Auto-ListProducts --skill "auto-list-products"
+npx skills add https://github.com/TheChosenOne666/Auto-ListProducts-skill --skill "auto-list-products"
 ```
 
 或把 `skills/auto-list-products/` 拷进你的 agent skill 目录（`~/.qoder-cn/skills/`、`~/.claude/skills/`

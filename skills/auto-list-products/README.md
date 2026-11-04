@@ -69,7 +69,7 @@ build on the platform the operator actually uses.
 ## Install
 
 ```bash
-npx skills add https://github.com/TheChosenOne666/Auto-ListProducts --skill "auto-list-products"
+npx skills add https://github.com/TheChosenOne666/Auto-ListProducts-skill --skill "auto-list-products"
 ```
 
 Or copy `skills/auto-list-products/` into your agent's skill directory

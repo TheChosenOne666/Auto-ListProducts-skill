@@ -6,8 +6,8 @@
     "name": "TheChosenOne666",
     "url": "https://github.com/TheChosenOne666"
   },
-  "homepage": "https://github.com/TheChosenOne666/Auto-ListProducts",
-  "repository": "https://github.com/TheChosenOne666/Auto-ListProducts",
+  "homepage": "https://github.com/TheChosenOne666/Auto-ListProducts-skill",
+  "repository": "https://github.com/TheChosenOne666/Auto-ListProducts-skill",
   "license": "MIT",
   "keywords": [
     "skills",
@@ -23,7 +23,7 @@
     "developerName": "TheChosenOne666",
     "category": "Productivity",
     "capabilities": [],
-    "websiteURL": "https://github.com/TheChosenOne666/Auto-ListProducts",
+    "websiteURL": "https://github.com/TheChosenOne666/Auto-ListProducts-skill",
     "defaultPrompt": [
       "Probe my store admin's create form and prepare it for bulk listing.",
       "Crop these product screenshots and build a listing queue.",

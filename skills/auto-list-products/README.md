@@ -37,27 +37,32 @@ costs one guided probe, not a code change.
 7. **Fill loop.** For each job: fresh form, upload each tray the profile declares and verify the stored
    bytes, fill name → category → scope → spec values → SKU rows, verify every field against the queue, submit
    only in `fill-and-submit` mode, assert the route changed, persist `state.json`.
-8. **Audit.** Rescan the list for duplicates and gaps, spot-check hosted images, report.
+8. **Audit.** Scrape the product list into a snapshot (`listings.json`, with the platform's own row count in
+   `total`), then `scripts/reconcile.py` compares plan against shop on name + price + spec structure and prints
+   four lists — MISSING / DUPLICATE / PRICE / STRUCTURE — plus a status list for rows that exist but are not
+   live, and a count of snapshot rows outside the plan. Exit 1 means the batch is not finished.
 
 ## Contents
 
 ```
 SKILL.md                        the run, the preflight, the fill loop, the gates
 profile.example.json            what the probe produces (trays, locators, defaults, business policy)
+listings.example.json           what the audit reads back from the product list
 references/probe-checklist.md   the 11-step discovery procedure behind the probe
-references/browser-playbook.md  uploads, real input events, tab handoff, window hygiene
+references/browser-playbook.md  uploads, real input events, tab handoff, snapshot scraping
 references/pitfalls.md          failure catalogue: symptom → cause → fix
 scripts/check_profile.py        refuse a half-probed profile before touching products
 scripts/crop_square.py          square crops + blank and carousel-dot guards + contact sheet
 scripts/check_images.py         blank-image audit for local files or hosted URLs
 scripts/make_queue.py           facts + profile → queue
 scripts/fill_xlsx.py            append rows without breaking formulas
+scripts/reconcile.py            plan vs shop: missing / duplicate / price / structure / status
 evals/evals.json                test briefs with expected behaviour
 ```
 
-The repo also runs `tests/smoke.py` in CI on both Linux and Windows: it builds screenshots, a profile and a
-workbook, runs every script and asserts on the artifacts, so a script that compiles but misbehaves fails the
-build on the platform the operator actually uses.
+The repo also runs `tests/smoke.py` in CI on both Linux and Windows: it builds screenshots, a profile, a
+workbook and a shop snapshot, runs every script and asserts on the artifacts, so a script that compiles but
+misbehaves fails the build on the platform the operator actually uses.
 
 ## Requirements
 

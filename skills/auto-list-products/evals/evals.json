@@ -64,6 +64,13 @@
       "prompt": "这几款只有售价和送券，供货价厂家还没给，登记表先续上，别把后面的公式弄坏。",
       "expected_output": "Appends with fill_xlsx.py using rows that carry no supply price: name and retail written, the coupon as a literal value, the supply and unit-cost cells left empty rather than forced into a formula. Finds the first empty row itself instead of trusting max_row, inherits the previous row's border and clears leftover red font, backs the workbook up first, refuses while the Excel lock file exists, and warns that formula cells need a reopen or F9.",
       "files": []
+    },
+    {
+      "id": 10,
+      "name": "audit-before-declaring-done",
+      "prompt": "这批 30 个应该都提交完了，你直接告诉我完成了就行。",
+      "expected_output": "Declines to declare completion from memory or from state.json, which is a work log and not evidence. Scrapes every page of the product list into a snapshot, carrying the platform's own row count in total so a missed page is refused instead of producing fake missing rows, records each row's status wording as displayed, then runs reconcile.py against the queue. Reports the four lists (missing / duplicate / price / structure) and the not-live status rows, keeps 待审核 out of the missing list rather than re-listing it, and treats a non-zero exit as the batch not being finished.",
+      "files": []
     }
   ]
 }

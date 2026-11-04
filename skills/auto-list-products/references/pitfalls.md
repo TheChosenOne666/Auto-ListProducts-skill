@@ -77,6 +77,27 @@ Fix: the scripts reconfigure stdout/stderr to UTF-8 with replacement at startup,
 it under a Chinese product name and case word. If you add a script to this skill, do the same or it will fail
 on the first batch that carries real names.
 
+## Audit reports products missing that are on the shelf
+
+Symptom: the reconcile list claims a dozen MISSING rows; the operator scrolls and finds them there.
+Cause: the snapshot was scraped with a status filter still applied, or the last page was never fetched.
+Fix: clear every filter before scraping, put the platform's own row count into `total`, and let
+`reconcile.py` refuse a snapshot whose rows do not match it (exit 2 rather than a false MISSING list).
+
+## A pending-review product got listed a second time
+
+Symptom: two rows for one product, one live and one waiting for review.
+Cause: the audit treated "not on the shelf yet" as "absent", or a local run log was trusted over the shop.
+Fix: statuses are a dimension of their own - the tool reports 待审核/待提交/已驳回 separately and does not put
+them in MISSING. Confirm against the snapshot, never against `state.json`.
+
+## A local run log was believed over the shop
+
+Symptom: the log says submitted, the shop has nothing.
+Cause: a submit that failed validation, an expired session mid-batch, or an edit refused on a reviewed
+listing all leave the log looking successful.
+Fix: run the queue against a fresh snapshot after every batch; the diff, not the log, is the record.
+
 ## Queue disagrees with the profile
 
 Symptom: the numbers filled into the form are not what the user agreed to; the flags were re-typed per batch.

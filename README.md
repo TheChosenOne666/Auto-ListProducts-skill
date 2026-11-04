@@ -18,6 +18,7 @@
 | 建队列 | 可断点续跑的 `queue.json`，规则全部取自 profile，同名同价自动去重 | `make_queue.py` |
 | 登记表 | 续填 Excel：自动定位空行、供货价保持数字、不打断公式、继承上一行样式 | `fill_xlsx.py` |
 | 填写 | 上传→名称→类目→范围→规格→SKU→逐项校验→提交 | `references/browser-playbook.md` |
+| 对账 | 抓取商品列表快照 → 计划 vs 店里：缺失/重复/价格不符/规格结构不符/状态未生效，离线只读 | `reconcile.py` |
 
 ## 安装
 
@@ -36,22 +37,24 @@ pip install pillow openpyxl   # 唯一的依赖
 
 ```
 1  预检        没有浏览器连接器 → 引导装扩展 → 确认是同一个已登录会话
-2  探测        打开上架页 → 读必填项 / 类目树 / 默认值 / 校验点 → 问业务规则 → 写 profile.json
+2  探测        打开上架页 → 读必填项 / 上传槽 / 类目树 / 默认值 / 校验点 → 问业务规则 → 写 profile.json
 3  试点        只跑一个商品，全部断言通过
-4  批量        裁图 → 提参数 → 建队列 → 逐单填写、逐项校验、按授权提交 → 收尾审计
+4  批量        裁图 → 提参数 → 建队列 → 逐单填写、逐项校验、按授权提交
+5  对账        抓商品列表快照 → 计划 vs 店里四类差异 → 按清单补漏/纠错，退出码非 0 就不算跑完
 ```
 
 ## 仓库结构
 
 ```
 skills/auto-list-products/
-├── SKILL.md                       主流程：预检 → 探测 → 裁图 → 队列 → 填写 → 审计
+├── SKILL.md                       主流程：预检 → 探测 → 裁图 → 队列 → 填写 → 对账
 ├── README.md                      这个 skill 的详细说明
 ├── profile.example.json           探测产出的平台档案
+├── listings.example.json          商品列表快照的形状（对账的输入）
 ├── references/                    探测清单、浏览器手法、踩坑清单
-├── scripts/                       五个可执行脚本（零 SDK 依赖）
+├── scripts/                       六个可执行脚本（零 SDK 依赖）
 └── evals/evals.json               验收用例：带 skill / 不带 skill 对比
-tests/smoke.py                     端到端冒烟测试：造夹具→跑五个脚本→断言产物
+tests/smoke.py                     端到端冒烟测试：造夹具→跑六个脚本→断言产物
 .github/workflows/check-skills.yml 结构自检 + 冒烟测试，Linux 与 Windows 各跑一遍
 ```
 

@@ -127,10 +127,12 @@ behaviour, so nothing has to be re-typed per batch:
 - points follow `business.pointsMode` (`none` / `coupon` / `fixed`), display counters follow
   `business.counters`, the coupon floor follows `business.minCoupon`;
 - same name + same retail is dropped as a duplicate; same name + different price is kept and reported;
-- a missing value, an unknown category key or an impossible coupon aborts the run without writing a queue.
+- a missing value, an unknown category key or an impossible coupon aborts the run without writing a queue;
+- `--board pickup` tags every item with the section of the shop it belongs to, so a shop with separate
+  self-pickup and courier sections is audited one section at a time.
 
 Flags (`--root`, `--points`, `--min-coupon`, `--display-counters`, `--no-case-sku`, `--stock`,
-`--spec-name`, `--only`) exist only to override the profile for a single run.
+`--spec-name`, `--board`, `--only`) exist only to override the profile for a single run.
 
 ## Phase 6 — Fill loop
 
@@ -163,9 +165,30 @@ the rest.
 
 ## Phase 7 — Audit
 
-- rescan the list for duplicates and missing items;
-- spot-check hosted images with `scripts/check_images.py --urls`;
-- report submitted / skipped / retried and anything still pending.
+A batch is not finished when the last submit returned; it is finished when the shop and the plan agree.
+
+1. Scrape the product list into a snapshot file (`listings.json`, shape in `listings.example.json`): every
+   page, the real row count in `total`, the status wording exactly as the page shows it, one entry per
+   product with its spec rows and prices. Follow `references/browser-playbook.md` § List snapshot.
+2. Reconcile the snapshot against the plan:
+
+   ```bash
+   python scripts/reconcile.py --expected queue.json --listings listings.json --board pickup --out diff.json
+   ```
+
+   The expected side can be `queue.json` (name + price + spec structure) or the registration workbook
+   (name + price + coupon; a sheet has no spec names, so the structure dimension is reported as skipped, not
+   passed). The script reads files only - it never touches the backend.
+3. Act on the four lists: **missing** (re-list), **price** (fix or accept, with both numbers shown),
+   **structure** (the case-only / wrong-spec shape that name-only checks hide), **duplicate** (delete the
+   extra), plus the **status** list of rows that exist but are not live. Exit code 1 means differences; do
+   not call a batch done on a green-looking run that exited 1.
+4. Spot-check hosted images with `scripts/check_images.py --urls`.
+5. Report submitted / skipped / retried / reconciled, and quote the residual diff.
+
+`state.json` is a work log, not evidence. Whether a product exists is answered by the snapshot and the
+reconcile, because a submit that failed, an expired session, or a reviewed-and-frozen listing all leave
+`state.json` claiming success.
 
 ## Safety
 
@@ -176,11 +199,13 @@ the rest.
 ## Resources
 
 - `profile.example.json` — the profile the probe produces (upload trays, locators, defaults, business policy).
+- `listings.example.json` — the snapshot the audit reads back from the product list.
 - `scripts/check_profile.py` — refuse a half-probed profile before touching products.
 - `scripts/crop_square.py` — square crops, blank + dot guards with `alt_src` fallback, contact sheet.
 - `scripts/check_images.py` — blank-image audit for local files or hosted URLs.
 - `scripts/make_queue.py` — facts + profile → queue (root, case label, points, counters, floor, stock).
 - `scripts/fill_xlsx.py` — append rows without breaking formulas.
+- `scripts/reconcile.py` — plan vs shop: missing / duplicate / price / structure, plus status and extras.
 - `references/probe-checklist.md` — the discovery procedure behind Phase 1.
 - `references/browser-playbook.md` — uploads, real input events, handoff, window hygiene.
 - `references/pitfalls.md` — failure catalogue with fixes.

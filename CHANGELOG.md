@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.0 — 2026-11-04
+
+The audit stopped being a paragraph and became a check that can fail a batch.
+
+- `scripts/reconcile.py`: compares the plan against a snapshot of the shop on **name + price + spec
+  structure**, and prints MISSING / DUPLICATE / PRICE / STRUCTURE plus a status list for rows that exist but
+  are not live. Expects either `queue.json` or the registration workbook (a sheet carries no spec names, so
+  the structure dimension is announced as skipped rather than silently passing). Exit 0 clean, 1 differences,
+  2 unusable input; `--out diff.json` for machine-readable results.
+- `listings.example.json`: the snapshot shape the agent writes after scraping the list, with the platform's
+  own row count in `total` — reconcile refuses a snapshot whose rows do not match it, because a missed page
+  reads as missing products and a fake missing product is how a duplicate listing gets created.
+- Name normalisation folds full-width punctuation and case-pack suffixes (`（箱*24瓶）`, `(1*24罐)`, `*24罐`)
+  so one product written four ways reconciles once, while a parenthesised size (`(2000g)`) stays part of the
+  name so 盐焗鹅 and 卤鹅 are not merged.
+- Same name + different price is never a duplicate; same name + same price twice is.
+- Unrecognised status wording is reported, not guessed into a bucket; `state.json` is documented as a work log,
+  never evidence that a listing exists.
+- `make_queue.py --board pickup` tags items with the shop section, so self-pickup and courier plans are
+  audited apart and one never satisfies the other.
+- `reconcile.py` reads files only: no network module in the source, asserted in CI.
+- References: browser playbook gained a list-snapshot section; the catalogue gained three entries (a missed
+  page faking missing rows, a pending-review row relisted, and a local log believed over the shop).
+- Evals: ten briefs.
+
 ## 0.2.0 — 2026-11-04
 
 The probe result became the single source of truth: the queue now reads it, and the scripts stopped

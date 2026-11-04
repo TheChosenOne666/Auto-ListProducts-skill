@@ -92,6 +92,23 @@ dragging it closes the dialog. Re-crop locally instead.
 - Persist the queue index after each success (`state.json`) so a crash resumes cleanly.
 - Stop the batch on the first failed assertion and report the item; never "fix it by clicking anyway".
 
+## List snapshot
+
+The audit compares against a snapshot of the product list, not against memory of what was submitted.
+
+- Walk **every page** and count the rows. Put the platform's own count into `total`; `reconcile.py` refuses a
+  snapshot whose `total` disagrees with its rows, because a missed page reads as a set of missing products and
+  a fake missing product is how a duplicate listing gets created.
+- Record per row: the id, the name exactly as displayed, the status wording exactly as displayed (do not
+  translate it into a guess - an unmapped word is reported instead of being silently bucketed), and one entry
+  per spec row with its price and points.
+- Two sections in the shop are two snapshots: give each file a `board`, or pass `--board` per file. Never
+  compare a self-pickup plan against a courier snapshot.
+- Write the file into the run folder with the batch timestamp in its name; `--out diff.json` overwrites, and
+  the previous diff is the only record of what the state was before the fix.
+- Filter menus matter: a list opened with a status filter applied yields a snapshot that cannot see the rows
+  in other states. Clear the filters first.
+
 ## Session and safety
 
 - Session expiry shows up as a redirect to a login route. Hand the tab to the user, wait for their word,

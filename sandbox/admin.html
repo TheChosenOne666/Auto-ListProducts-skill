@@ -61,6 +61,8 @@
   <b>商品上架练习沙盒</b>
   <span class="warn">练习用，不是任何真实店铺</span>
   <span class="hint">数据只存在本机浏览器 localStorage，页面不发任何网络请求</span>
+  <label class="hint" for="board-pick">板块</label>
+  <select id="board-pick"></select>
   <nav id="nav"></nav>
   <button id="reset">重置为种子数据</button>
 </header>
@@ -83,30 +85,42 @@ var TREE = {
 
 // 种子刻意做出几种真实差异形状，让校验与对账有东西可抓：
 // 一条只有整箱行（缺单件）、一条价格与常见队列不同、一条待审核、一条在回收站。
-function spec(name, price, points, weight, stock) {
+function spec(name, price, points, weight, stock, volume, listed) {
   return { name: name, price: price, stock: stock === undefined ? 10000 : stock, points: points,
-           weight: weight, listed: true, image: null };
+           weight: weight, volume: volume === undefined ? null : volume,
+           listed: listed === undefined ? true : listed, image: null };
 }
+
+// 板块差异是刻意做的：快递没有上架范围，SKU 表多一列体积、重量必填，"是否上架"默认关。
+var BOARDS = {pickup: "到店自提", express: "快递发货"};
+var REQUIRED_COLUMNS = {pickup: ["price", "stock", "points", "weight"],
+                        express: ["price", "stock", "points", "weight", "volume"]};
+var board = "pickup";
 
 function seed() {
   return [
-    row("SPU202601021015001111", "农夫山泉天然水550ml", "酒水饮料" + SEP + "饮用水", "on-sale",
+    row("SPU202601021015001111", "pickup", "农夫山泉天然水550ml", "酒水饮料" + SEP + "饮用水", "on-sale",
         [spec("550ml*1瓶", 2, 1.1, 570), spec("24瓶*箱", 48, 26.4, 13600)]),
-    row("SPU202601021016002222", "康师傅红烧牛肉面", "方便速食" + SEP + "泡面", "on-sale",
+    row("SPU202601021016002222", "pickup", "康师傅红烧牛肉面", "方便速食" + SEP + "泡面", "on-sale",
         [spec("105g*1袋", 4.5, 1.5, 110)]),
-    row("SPU202601021017003333", "乐事薯片原味70g", "食品/零食" + SEP + "薯片", "on-sale",
+    row("SPU202601021017003333", "pickup", "乐事薯片原味70g", "食品/零食" + SEP + "薯片", "on-sale",
         [spec("12袋*箱", 78, 30, 900)]),
-    row("SPU202601030930004444", "银鹭八宝粥360g", "方便速食" + SEP + "八宝粥", "pending-review",
+    row("SPU202601030930004444", "pickup", "银鹭八宝粥360g", "方便速食" + SEP + "八宝粥", "pending-review",
         [spec("360g*1罐", 5, 1.6, 400), spec("12罐*箱", 54, 19.2, 4900)]),
-    row("SPU202601030945005555", "老枞单丛茶叶500g", "酒水饮料" + SEP + "茶饮料" + SEP + "乌龙茶", "pending-review",
+    row("SPU202601030945005555", "pickup", "老枞单丛茶叶500g", "酒水饮料" + SEP + "茶饮料" + SEP + "乌龙茶", "pending-review",
         [spec("500g*1盒", 238, 128, 612)]),
-    row("SPU202601010800006666", "乐事薯片黄瓜味70g", "食品/零食" + SEP + "薯片", "recycled",
-        [spec("70g*1袋", 6, 2, 90)])
+    row("SPU202601010800006666", "pickup", "乐事薯片黄瓜味70g", "食品/零食" + SEP + "薯片", "recycled",
+        [spec("70g*1袋", 6, 2, 90)]),
+    row("SPU202601041000007777", "express", "康师傅红烧牛肉面", "方便速食" + SEP + "泡面", "on-sale",
+        [spec("105g*1袋", 4.5, 1.0, 110, 10000, 0.0004, false)]),
+    row("SPU202601041001008888", "express", "老枞单丛茶叶500g", "酒水饮料" + SEP + "茶饮料" + SEP + "乌龙茶", "pending-review",
+        [spec("500g*1盒", 238, 123, 612, 10000, 0.002, false)])
   ];
-  function row(id, name, category, status, specs) {
-    return { id: id, name: name, category: category, scope: "全域自提点", code: "", barcode: "",
+  function row(id, section, name, category, status, specs) {
+    return { id: id, board: section, name: name, category: category,
+             scope: section === "pickup" ? "全域自提点" : null, code: "", barcode: "",
              specName: "规格", specs: specs,
-             images: { main: { name: id + "-main.png", bytes: 168320 }, detail: [] },
+             images: {main: {name: id + "-main.png", bytes: 168320}, detail: []},
              status: status, createdAt: isoFromId(id) };
   }
 }
@@ -132,22 +146,39 @@ function save(state) {
 var state = load();
 
 // ---------- 快照：与 listings.example.json 同形状 ----------
-function snapshot(board) {
-  var rows = state.items.filter(function (it) { return it.status !== "recycled"; });
+function snapshot(which) {
+  var wanted = which || board;
+  var rows = state.items.filter(function (it) {
+    return it.status !== "recycled" && (it.board || "pickup") === wanted;
+  });
   return {
-    board: board || "pickup",
+    board: wanted,
     capturedAt: new Date().toISOString(),
     source: location.href.split("#")[0] + "#/list",
     total: rows.length,
     items: rows.map(function (it) {
       return { id: it.id, name: it.name, status: it.status,
                specs: it.specs.map(function (s) {
-                 return { name: s.name, price: s.price, points: s.points, stock: s.stock, weight: s.weight, listed: s.listed };
+                 var out = {name: s.name, price: s.price, points: s.points, stock: s.stock, listed: s.listed};
+                 if (s.weight !== null && s.weight !== undefined) { out.weight = s.weight; }
+                 if (s.volume !== null && s.volume !== undefined) { out.volume = s.volume; }
+                 return out;
                }) };
     })
   };
 }
 window.__alpSnapshot = snapshot;
+
+function renderBoardPicker() {
+  var pick = document.getElementById("board-pick");
+  pick.innerHTML = "";
+  Object.keys(BOARDS).forEach(function (key) {
+    var opt = el("option", { value: key, text: BOARDS[key] });
+    if (key === board) { opt.selected = true; }
+    pick.appendChild(opt);
+  });
+  pick.onchange = function () { board = pick.value; route(); };
+}
 
 // ---------- 路由 ----------
 var ROUTES = [["#/new", "新建商品"], ["#/list", "商品列表"], ["#/recycle", "回收站"]];
@@ -159,6 +190,7 @@ function renderNav() {
 }
 function route() {
   var here = location.hash || "#/new";
+  renderBoardPicker();
   renderNav();
   if (here === "#/list") { renderList(); }
   else if (here === "#/recycle") { renderRecycle(); }
@@ -194,9 +226,17 @@ function renderForm() {
   var barcode = el("input", { id: "f-barcode", placeholder: "条码（可留空）" });
   basic.appendChild(field("商品名称", name, true));
   basic.appendChild(cascaderCard());
-  basic.appendChild(el("div", { "class": "row" }, [field("上架范围", scope, true),
-                                                  field("商家编码", code), field("条码", barcode)]));
+  var row2 = [field("商家编码", code), field("条码", barcode)];
+  if (board === "pickup") { row2.unshift(field("上架范围", scope, true)); }
+  else {
+    // 快递板块没有上架范围，只有一段静态发货说明 - 板块之间字段集不同是常态，不是异常
+    basic.appendChild(el("div", { "class": "kv", text: "发货说明：顺丰次日达，运费由平台承担（本页为静态文案，不可编辑）" }));
+  }
+  basic.appendChild(el("div", { "class": "row" }, row2));
   basic.appendChild(el("div", { "class": "hint", text: "提示：标了 * 的字段会被检查；没标 * 的字段也可能拦住提交。" }));
+  basic.appendChild(el("div", { "class": "hint",
+    text: board === "pickup" ? "当前板块：到店自提（必填列 价格/库存/积分/重量，是否上架默认开）"
+                              : "当前板块：快递发货（多了必填的体积列，是否上架默认关，没有上架范围）" }));
 
   var specCard = el("div", { "class": "card" }, [el("h2", { text: "规格与 SKU" })]);
   var specName = el("input", { id: "f-specname", placeholder: "规格名，如 规格", value: "规格" });
@@ -239,21 +279,27 @@ function renderForm() {
   }
   function redrawSkuTable() {
     tableWrap.innerHTML = "";
+    var express = board === "express";
     var rows = specValues.map(function (v, i) {
-      return el("tr", {}, [
+      var cells = [
         el("td", { text: v || "(未填)" }),
         el("td", {}, [numInput("price", i, "")]),
         el("td", {}, [numInput("stock", i, "10000")]),
         el("td", {}, [numInput("points", i, "")]),
-        el("td", {}, [numInput("weight", i, "")]),
-        el("td", {}, [el("input", { type: "checkbox", checked: "", "data-field": "listed", "data-idx": String(i) })]),
-        el("td", {}, [fileCell("f-sku-" + i)])
-      ]);
+        el("td", {}, [numInput("weight", i, "")])
+      ];
+      if (express) { cells.push(el("td", {}, [numInput("volume", i, "")])); }
+      var listed = el("input", { type: "checkbox", "data-field": "listed", "data-idx": String(i) });
+      if (!express) { listed.checked = true; }   // 快递板块的"是否上架"默认关，必须手动打开
+      cells.push(el("td", {}, [listed]));
+      cells.push(el("td", {}, [fileCell("f-sku-" + i)]));
+      return el("tr", {}, cells);
     });
-    if (!rows.length) { rows = [el("tr", {}, [el("td", { text: "先加一个规格值", colspan: "7" })])]; }
-    tableWrap.appendChild(el("table", {}, [
-      el("tr", {}, [h("规格值"), h("价格"), h("库存"), h("积分"), h("重量(g)"), h("是否上架"), h("规格图")])
-    ].concat(rows)));
+    var head = [h("规格值"), h("价格"), h("库存"), h("积分"), h("重量(g)")];
+    if (express) { head.push(h("体积(m³)")); }
+    head.push(h("是否上架"), h("规格图"));
+    if (!rows.length) { rows = [el("tr", {}, [el("td", { text: "先加一个规格值", colspan: String(head.length) })])]; }
+    tableWrap.appendChild(el("table", {}, [el("tr", {}, head)].concat(rows)));
   }
   function fileCell(key) {
     files[key] = files[key] || [];
@@ -301,15 +347,20 @@ function renderForm() {
     if (!cascaderValue) { problems.push("商品类目未选择"); }
     var values = specValues.filter(Boolean);
     if (!values.length) { problems.push("至少需要一个规格值"); }
+    var required = REQUIRED_COLUMNS[board];
     tableWrap.querySelectorAll("tr").forEach(function (tr, i) {
       if (i === 0 || !values[i - 1]) { return; }
-      var fields = {};
-      tr.querySelectorAll("input").forEach(function (input) { fields[input.getAttribute("data-field")] = input; });
-      if (fields.price.value === "" || fields.points.value === "" || fields.stock.value === "") {
-        problems.push("规格「" + values[i - 1] + "」的价格/库存/积分没填全");
+      var cols = {};
+      tr.querySelectorAll("input").forEach(function (input) { cols[input.getAttribute("data-field")] = input; });
+      var empty = required.filter(function (key) { return cols[key] && cols[key].value === ""; });
+      if (empty.length) {
+        problems.push("规格「" + values[i - 1] + "」的 " + empty.join("/") + " 为空");
       }
-      if (fields.weight.value === "") { problems.push("规格「" + values[i - 1] + "」的重量为空"); }
     });
+    if (board === "express") {
+      var off = [...tableWrap.querySelectorAll('[data-field="listed"]')].filter(function (c) { return c.checked; }).length;
+      if (!off) { problems.push("快递板块每行的「是否上架」默认关，至少要打开一行"); }
+    }
     var main = files["f-main"][0];
     if (!main) { problems.push("主图未上传"); }
     return problems;
@@ -318,16 +369,22 @@ function renderForm() {
   function collected() {
     var rows = [];
     var valueList = specValues.filter(Boolean);
+    var express = board === "express";
     valueList.forEach(function (v, i) {
       var tr = tableWrap.querySelectorAll("tr")[i + 1];
       var f = {};
-      tr.querySelectorAll("input").forEach(function (input) { f[input.getAttribute("data-field")] = input.value; });
-      rows.push({ name: v, price: Number(f.price), stock: Number(f.stock), points: Number(f.points),
-                  weight: Number(f.weight), listed: tr.querySelector('[data-field="listed"]').checked,
-                  image: files["f-sku-" + i][0] || null });
+      tr.querySelectorAll("input").forEach(function (input) {
+        var key = input.getAttribute("data-field");
+        if (key) { f[key] = input.type === "checkbox" ? input.checked : input.value; }
+      });
+      var row = { name: v, price: Number(f.price), stock: Number(f.stock), points: Number(f.points),
+                  weight: Number(f.weight), listed: f.listed, image: files["f-sku-" + i][0] || null };
+      if (express) { row.volume = Number(f.volume); }
+      rows.push(row);
     });
-    var created = { id: "SPU" + stamp() + String(state.seq).padStart(4, "0"), name: name.value.trim(),
-                    category: cascaderValue, scope: scope.value, code: code.value.trim(),
+    var created = { id: "SPU" + stamp() + String(state.seq).padStart(4, "0"), board: board,
+                    name: name.value.trim(),
+                    category: cascaderValue, scope: express ? null : scope.value, code: code.value.trim(),
                     barcode: barcode.value.trim(), specName: specName.value.trim(), specs: rows,
                     images: { main: files["f-main"][0] || null,
                               detail: files["f-detail"].slice() },
@@ -452,7 +509,9 @@ function commit(created) {
 function renderList() {
   var view = document.getElementById("view");
   view.innerHTML = "";
-  var rows = state.items.filter(function (it) { return it.status !== "recycled"; });
+  var rows = state.items.filter(function (it) {
+    return it.status !== "recycled" && (it.board || "pickup") === board;
+  });
   var table = el("table", {}, [el("tr", {}, [
     th("商品名称"), th("类目"), th("规格行"), th("最低价"), th("状态"), th("建品时间"), th("操作")])]);
   rows.forEach(function (it) {
@@ -469,8 +528,9 @@ function renderList() {
           function () { it.status = "recycled"; save(state); renderList(); }); } })])
     ]));
   });
+  if (!rows.length) { table.appendChild(el("tr", {}, [el("td", { text: "这个板块还没有商品", colspan: "7" })])); }
   var card = el("div", { "class": "card" }, [
-    el("h2", { text: "商品列表（到店自提）" }),
+    el("h2", { text: "商品列表（" + BOARDS[board] + "）" }),
     el("div", { "class": "kv", text: "共 " + rows.length + " 条 · 状态筛选：全部（默认不带筛选，抓快照前先确认这里写着「全部」）" }),
     table
   ]);
@@ -483,7 +543,9 @@ function renderList() {
 function renderRecycle() {
   var view = document.getElementById("view");
   view.innerHTML = "";
-  var rows = state.items.filter(function (it) { return it.status === "recycled"; });
+  var rows = state.items.filter(function (it) {
+    return it.status === "recycled" && (it.board || "pickup") === board;
+  });
   var table = el("table", {}, [el("tr", {}, [th("商品名称"), th("类目"), th("状态"), th("操作")])]);
   rows.forEach(function (it) {
     table.appendChild(el("tr", {}, [el("td", { text: it.name }), el("td", { text: it.category }),

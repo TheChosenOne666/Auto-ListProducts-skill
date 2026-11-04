@@ -28,14 +28,18 @@ LISTINGS = ROOT / "skills" / "auto-list-products" / "listings.example.json"
 NETWORK_TOKENS = ["fetch(", "XMLHttpRequest", "WebSocket", "EventSource", "import(",
                   "src=\"http", "href=\"http", "//cdn", "//unpkg", "//jsdelivr", "@import url"]
 
-# every trap the README promises, paired with the code that has to implement it
+# every trap the README promises, paired with the code that has to implement it.
+# Patterns match the definitions, not the error wording, so a message can be rephrased safely.
 TRAPS = {
-    "重量不标必填但拦住提交": r"的重量为空",
+    "重量不标必填但拦住提交": r'REQUIRED_COLUMNS = \{pickup: \["price", "stock", "points", "weight"\]',
     "同名类目节点": r'"食品/零食": \{[^}]*"食品": null',
     "速食食品与食品互相包含": r'"速食食品"',
     "主图必须上传": r"主图未上传",
     "提交需要二次确认": r"确认提交审核",
     "库存预填默认值": r'numInput\("stock", i, "10000"\)',
+    "快递板块多了必填的体积列": r'express: \["price", "stock", "points", "weight", "volume"\]',
+    "快递板块没有上架范围": r'scope: express \? null : scope\.value',
+    "快递板块是否上架默认关": r'if \(!express\) \{ listed\.checked = true',
 }
 
 failures: list[str] = []

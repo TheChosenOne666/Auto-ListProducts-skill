@@ -7,7 +7,7 @@ you run after uploading, because the backend's stored object is the ground truth
 
 Usage
   python check_images.py --dir crops
-  python check_images.py --dir crops --glob "*.jpg" --json report.json
+  python check_images.py --dir crops --ext jpg,jpeg,png,webp --json report.json
   python check_images.py --urls urls.txt            # one URL per line
   python check_images.py --urls urls.txt --min-bytes 50000
 
@@ -16,7 +16,6 @@ Exit codes: 0 clean, 1 suspects found.
 from __future__ import annotations
 
 import argparse
-import glob
 import io
 import json
 import os
@@ -25,23 +24,23 @@ import urllib.request
 
 from PIL import Image
 
+DEFAULT_EXTS = "jpg,jpeg,png,webp"
+
 
 def inspect_bytes(blob: bytes) -> tuple[int, int]:
     im = Image.open(io.BytesIO(blob)).convert("RGB")
     return im.size[0] * im.size[1], len(set(list(im.getdata())[::53]))
 
 
-def inspect_path(path: str) -> tuple[int, int, int]:
+def inspect_path(path: str) -> tuple[int, int]:
     blob = open(path, "rb").read()
-    _, colors = inspect_bytes(blob)
-    return len(blob), colors, 0
+    return len(blob), inspect_bytes(blob)[1]
 
 
-def inspect_url(url: str) -> tuple[int, int, int]:
+def inspect_url(url: str) -> tuple[int, int]:
     req = urllib.request.Request(url, headers={"User-Agent": "auto-list-products/1.0"})
     blob = urllib.request.urlopen(req, timeout=30).read()
-    colors = inspect_bytes(blob)[1]
-    return len(blob), colors, 0
+    return len(blob), inspect_bytes(blob)[1]
 
 
 def main() -> int:
@@ -49,7 +48,8 @@ def main() -> int:
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--dir", help="folder of local images")
     src.add_argument("--urls", help="text file with one image URL per line")
-    ap.add_argument("--glob", default="*.jpg", help="glob for --dir (default *.jpg)")
+    ap.add_argument("--ext", default=DEFAULT_EXTS,
+                    help="comma separated extensions for --dir; the crops folder mixes jpg and png")
     ap.add_argument("--min-bytes", type=int, default=50000, help="smaller than this counts as blank")
     ap.add_argument("--min-colors", type=int, default=200, help="fewer sampled colours counts as blank")
     ap.add_argument("--json", help="write a JSON report here")
@@ -57,7 +57,15 @@ def main() -> int:
 
     targets: list[tuple[str, str]] = []
     if args.dir:
-        targets = [(p, "file") for p in sorted(glob.glob(os.path.join(args.dir, args.glob)))]
+        exts = tuple("." + e.strip().lower().lstrip(".") for e in args.ext.split(",") if e.strip())
+        for root, _, files in os.walk(args.dir):
+            for name in sorted(files):
+                if name.lower().endswith(exts):
+                    targets.append((os.path.join(root, name), "file"))
+        targets.sort()
+        if not targets:
+            print(f"no {exts} images under {args.dir}", file=sys.stderr)
+            return 1
     else:
         with open(args.urls, encoding="utf-8") as fh:
             targets = [(line.strip(), "url") for line in fh if line.strip()]
@@ -65,7 +73,7 @@ def main() -> int:
     rows, bad = [], []
     for target, kind in targets:
         try:
-            size, colors, _ = inspect_path(target) if kind == "file" else inspect_url(target)
+            size, colors = inspect_path(target) if kind == "file" else inspect_url(target)
         except Exception as exc:  # network / decode failures are suspects too
             rows.append({"target": target, "error": str(exc)[:160]})
             bad.append(target)

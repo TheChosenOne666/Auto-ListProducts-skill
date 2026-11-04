@@ -15,7 +15,7 @@ categories.json (map of category key -> platform path):
 
 Output queue.json entries carry everything the browser step needs for one item:
   v1/v2 (spec values), price1/pt1 (single unit), price2/pt2 (full case), stock, specName,
-  expectCat (the exact path string used for the post-selection assertion).
+  expectCat (the exact path string used for the post-selection assertion), and board when tagged.
 
 Usage
   python make_queue.py --profile profile.json --products products.json \
@@ -24,7 +24,7 @@ Usage
 Overrides (each wins over the profile)
   --root "根类目名"        --min-coupon 0.5        --points coupon|fixed|none
   --display-counters      --no-case-sku           --only 5,7,8
-  --stock 10000           --spec-name 规格
+  --stock 10000           --spec-name 规格         --board pickup
 
 Policy notes
   * Nothing is skipped by default: `business.minCoupon` of 0 means no coupon floor.
@@ -87,6 +87,8 @@ def main() -> int:
     ap.add_argument("--only", help="comma separated product numbers to include")
     ap.add_argument("--stock", type=int, help="override defaults.stock")
     ap.add_argument("--spec-name", help="override defaults.specName")
+    ap.add_argument("--board", help="tag every item with a board key (pickup, express) so the audit can "
+                                    "reconcile each section of the shop on its own")
     args = ap.parse_args()
 
     profile = load(args.profile)
@@ -169,6 +171,8 @@ def main() -> int:
             "price1": retail,
             "coupon": coupon,
         }
+        if args.board:
+            item["board"] = args.board
         if spec_name:
             item["specName"] = spec_name
         if p.get("stock") is not None:

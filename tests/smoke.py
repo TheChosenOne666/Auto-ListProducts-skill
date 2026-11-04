@@ -216,10 +216,11 @@ def test_queue(tmp: Path, profile: Path) -> None:
     check("sales" in a and "fav" in a, "display counters emitted per profile")
 
     res = run("make_queue.py", "--profile", profile, "--products", products_path, "--categories", cats,
-              "--out", tmp / "q2.json", "--no-case-sku", "--points", "none", "--root", "Other")
+              "--out", tmp / "q2.json", "--no-case-sku", "--points", "none", "--root", "Other", "--board", "pickup")
     check(res.returncode == 0, "flags override the profile")
     q2 = json.loads((tmp / "q2.json").read_text(encoding="utf-8"))
     check("v2" not in q2[0] and "pt1" not in q2[0], "overrides removed the case row and points")
+    check(q2[0]["board"] == "pickup", "--board tags every item for the audit")
     check(q2[0]["sales"] == a["sales"], "counters still come from the profile")
     check(q2[0]["expectCat"].startswith("Other / "), "--root override applied")
 
@@ -290,6 +291,241 @@ def test_xlsx(tmp: Path) -> None:
     check(res.returncode == 1 and "not in" in res.stderr, "refuses an unknown sheet name")
 
 
+def rec(*args) -> subprocess.CompletedProcess:
+    cmd = [sys.executable, str(SCRIPTS / "reconcile.py"), *[str(a) for a in args]]
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+
+def load_reconcile():
+    """Import reconcile.py by path so the pure rules can be asserted without a subprocess."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("reconcile", SCRIPTS / "reconcile.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def row(name, price, specs=None, status="on-sale", board=None, ident=None):
+    return {"id": ident or f"SPU20260101120000{abs(hash(name)) % 1000:03d}", "name": name, "status": status,
+            "board": board, "specs": specs if specs is not None else [{"name": f"{name} size", "price": price}]}
+
+
+def want(n, name, price, v1=None, v2=None, pt1=None, board=None):
+    item = {"n": n, "name": name, "price1": price}
+    if v1:
+        item["v1"] = v1
+    if v2:
+        item["v2"] = v2
+    if pt1 is not None:
+        item["pt1"] = pt1
+    if board:
+        item["board"] = board
+    return item
+
+
+def snapshot(tmp: str, name: str, items, total=None, board=None) -> Path:
+    path = tmp / name
+    body = {"items": items}
+    if board:
+        body["board"] = board
+    if total is not None:
+        body["total"] = total
+    path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def queue_file(tmp: str, name: str, items) -> Path:
+    path = tmp / name
+    path.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_reconcile(tmp: Path) -> None:
+    folder = tmp / "rec"
+    folder.mkdir(exist_ok=True)
+    tmp = folder
+
+    module = load_reconcile()
+    norm = module.normalize_name
+    check(norm("示例商品 330ml（箱*24罐）") == norm("示例商品330ml"),
+          "case-pack suffix in full-width brackets normalises away")
+    check(norm("Item (1*24罐)") == norm("Item") and norm("Item*24罐") == norm("Item"),
+          "half-width and bare-suffix pack notations normalise the same")
+    check(norm("盐焗鹅(2000g)") == "盐焗鹅2000g" and norm("卤鹅(2000g)") == "卤鹅2000g",
+          "a parenthesised size that is not pack notation is kept, so 盐焗鹅 and 卤鹅 stay different products")
+    check(norm("A (箱*24瓶) 500ml") != norm("A 330ml"), "normalisation does not collapse different products")
+
+    source = (SCRIPTS / "reconcile.py").read_text(encoding="utf-8")
+    check(not any(tok in source for tok in ("urllib", "socket", "requests", "http.client")),
+          "reconcile reads files only - no network module in the source")
+    check(module.created_from_id("SPU202610241058190914") == "2026-10-24 10:58",
+          "the creation time is read out of the SPU code")
+
+    # 1. plan and shop agree
+    items = [row("A 500ml", 3.0, [{"name": "500ml*1瓶", "price": 3.0, "points": 0.8},
+                                  {"name": "15瓶*箱", "price": 45.0}])]
+    q = queue_file(tmp, "q1.json", [want(1, "A 500ml", 3.0, "500ml*1瓶", "15瓶*箱", 0.8)])
+    s = snapshot(tmp, "l1.json", items, total=1, board="pickup")
+    res = rec("--expected", q, "--listings", s, "--board", "pickup")
+    check(res.returncode == 0 and "plan and shop agree" in res.stdout, "an exact match exits 0")
+
+    # 2. missing product
+    res = rec("--expected", queue_file(tmp, "q2.json", [want(2, "Ghost", 9.9, "1L*1瓶")]), "--listings", s, "--board", "pickup")
+    check(res.returncode == 1 and "MISSING - in the plan, not in the shop: 1" in res.stdout and "Ghost" in res.stdout,
+          "a product absent from the shop is reported as MISSING with its name")
+
+    # 3. price drift
+    drifted = [row("A 500ml", 3.0, [{"name": "500ml*1瓶", "price": 3.0}], ident="SPU202601020930112233")]
+    res = rec("--expected", queue_file(tmp, "q3.json", [want(3, "A 500ml", 3.5, "500ml*1瓶")]),
+              "--listings", snapshot(tmp, "l3.json", drifted, board="pickup"), "--board", "pickup")
+    check(res.returncode == 1 and "期望 3.5" in res.stdout and "实际 3.0" in res.stdout
+          and "建于 2026-01-02 09:30" in res.stdout, "a price change that never reached the shop is priced, with the built time")
+
+    # 4. case-only listing (the real shape of the three milk products that shipped without a single unit)
+    case_only = [row("M 250ml", 72.0, [{"name": "24盒*箱", "price": 72.0}], ident="SPU202610241058190914")]
+    res = rec("--expected", queue_file(tmp, "q4.json", [want(4, "M 250ml", 3.0, "250ml*1盒", "24盒*箱")]),
+              "--listings", snapshot(tmp, "l4.json", case_only, board="pickup"), "--board", "pickup")
+    check("PRICE" in res.stdout and "实际 72" in res.stdout and "MISSING - in the plan, not in the shop: 0" in res.stdout,
+          "a listing that only has the case row surfaces as a price problem, not as a missing product")
+    res = rec("--expected", queue_file(tmp, "q4b.json", [want(4, "M 250ml", 3.0, "250ml*1盒", "12盒*箱")]),
+              "--listings", snapshot(tmp, "l4b.json", [row("M 250ml", 3.0, [{"name": "250ml*1盒", "price": 3.0},
+                                                                           {"name": "24盒*箱", "price": 60.0}])],
+                                     board="pickup"), "--board", "pickup")
+    check("STRUCTURE" in res.stdout and "缺规格 ['12盒*箱']" in res.stdout,
+          "same price but the wrong spec rows is a structure mismatch")
+
+    # 5. same name, different price is not a duplicate
+    pair = [row("T 500ml", 3.0), row("T 500ml", 3.5)]
+    qpair = queue_file(tmp, "q5.json", [want(5, "T 500ml", 3.0, "T 500ml size"), want(6, "T 500ml", 3.5, "T 500ml size")])
+    res = rec("--expected", qpair, "--listings", snapshot(tmp, "l5.json", pair, board="pickup"), "--board", "pickup")
+    check(res.returncode == 0 and "DUPLICATE - same name and price listed more than once: 0" in res.stdout,
+          "two products sharing a name at different prices are both accepted")
+
+    # 6. same name, same price twice is a duplicate
+    res = rec("--expected", queue_file(tmp, "q6.json", [want(7, "T 500ml", 3.0, "T 500ml size")]),
+              "--listings", snapshot(tmp, "l6.json", [row("T 500ml", 3.0), row("T 500ml", 3.0)], board="pickup"),
+              "--board", "pickup")
+    check("DUPLICATE - same name and price listed more than once: 1" in res.stdout and "x2" in res.stdout,
+          "the same name at the same price listed twice is a duplicate")
+
+    # 7. suffix writing differences do not create fake gaps
+    res = rec("--expected", queue_file(tmp, "q7.json", [want(8, "示例商品 330ml", 3.0, "330ml*1罐")]),
+              "--listings", snapshot(tmp, "l7.json", [row("示例商品330ml（箱*24罐）", 3.0, [{"name": "330ml*1罐", "price": 3.0}])],
+                                     board="pickup"), "--board", "pickup")
+    check(res.returncode == 0, "the same product written with or without a case-pack suffix reconciles")
+
+    # 8. boards stay apart
+    express = snapshot(tmp, "l-express.json", [row("Only In Express", 20.0)], board="express")
+    res = rec("--expected", queue_file(tmp, "q8.json", [want(9, "Only In Express", 20.0)]),
+              "--listings", express, "--board", "pickup")
+    check("MISSING - in the plan, not in the shop: 1" in res.stdout and "extras: 1" in res.stdout,
+          "a pickup expectation is not satisfied by an express row - boards do not leak")
+    both = snapshot(tmp, "l-both.json", [row("P Item", 3.0, board="pickup"), row("E Item", 30.0, board="express")])
+    res = rec("--expected", queue_file(tmp, "q8b.json", [want(10, "P Item", 3.0, board="pickup"),
+                                                        want(11, "E Item", 30.0, board="express")]),
+              "--listings", both)
+    check(res.returncode == 0, "row-level board tags reconcile each board on its own")
+
+    # 9. status is reported, not counted as missing
+    pending = [row("A 500ml", 3.0, [{"name": "500ml*1瓶", "price": 3.0}], status="待审核")]
+    res = rec("--expected", queue_file(tmp, "q9.json", [want(12, "A 500ml", 3.0, "500ml*1瓶")]),
+              "--listings", snapshot(tmp, "l9.json", pending, board="pickup"), "--board", "pickup")
+    check("MISSING - in the plan, not in the shop: 0" in res.stdout and "STATUS - found, but not live on the shelf: 1" in res.stdout
+          and "待审核" in res.stdout, "a pending-review row is named as a status, never re-listed as missing")
+    weird = [row("A 500ml", 3.0, [{"name": "500ml*1瓶", "price": 3.0}], status="库存异常")]
+    res = rec("--expected", queue_file(tmp, "q9b.json", [want(13, "A 500ml", 3.0, "500ml*1瓶")]),
+              "--listings", snapshot(tmp, "l9b.json", weird, board="pickup"), "--board", "pickup")
+    check("STATUS WORD NOT RECOGNISED" in res.stdout, "an unknown status wording is reported instead of guessed")
+
+    # 10. unusable input is refused loudly
+    bad = tmp / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    res = rec("--expected", bad, "--listings", s)
+    check(res.returncode == 2 and "cannot reconcile" in res.stderr, "invalid JSON is refused with exit 2")
+    res = rec("--expected", queue_file(tmp, "q10.json", [want(14, "A", 1.0)]),
+              "--listings", snapshot(tmp, "l10.json", [row("A", 1.0)], total=999))
+    check(res.returncode == 2 and "a page is missing" in res.stderr, "a snapshot whose total disagrees with its rows is refused")
+    res = rec("--expected", str(tmp / "nope.txt"), "--listings", s)
+    check(res.returncode == 2, "an unrecognised expected format is refused")
+    res = rec("--expected", queue_file(tmp, "q10b.json", [{"name": "no price"}]), "--listings", s)
+    check(res.returncode == 2 and "name and price1" in res.stderr, "a queue item without price1 is refused, not skipped")
+
+    # 11. scale
+    big_want = [want(i, f"Bulk {i}", 1.0 + i, f"{i}ml*1瓶") for i in range(1, 201)]
+    big_rows = [row(f"Bulk {i}", 1.0 + i, [{"name": f"{i}ml*1瓶", "price": 1.0 + i}]) for i in range(1, 701)]
+    import time
+
+    start = time.time()
+    res = rec("--expected", queue_file(tmp, "q11.json", big_want),
+              "--listings", snapshot(tmp, "l11.json", big_rows, total=700, board="pickup"), "--board", "pickup")
+    elapsed = time.time() - start
+    check(res.returncode == 0 and elapsed < 20, f"200 x 700 reconciles in {elapsed:.1f}s")
+    check("extras: 500 snapshot rows are not in the expected list" in res.stdout,
+          "snapshot rows outside the plan are summarised, not dumped")
+    res = rec("--expected", queue_file(tmp, "q11.json", big_want),
+              "--listings", snapshot(tmp, "l11.json", big_rows, total=700, board="pickup"), "--board", "pickup",
+              "--show-extras")
+    check(res.stdout.count("\n  - Bulk") >= 1, "--show-extras expands the extras detail")
+
+    # 12. the sheet as an expected source
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "登记"
+    for col, value in zip("DEFGH", ["产品名称", "售价", "送券", "供货价", "单件成本"]):
+        ws[f"{col}1"] = value
+    ws["D2"], ws["E2"], ws["F2"] = "A 500ml", 3.0, 0.9
+    ws["D3"], ws["E3"], ws["F3"] = "Not Listed", 8.0, 1.0
+    book = tmp / "sheet.xlsx"
+    wb.save(book)
+    res = rec("--expected", book, "--sheet", "登记", "--listings", s, "--board", "pickup")
+    check(res.returncode == 1 and "Not Listed" in res.stdout
+          and "the expected source carries no spec names" in res.stdout,
+          "a workbook expectation reconciles prices and says the structure dimension was skipped")
+
+    # 13. machine-readable output
+    res = rec("--expected", q, "--listings", s, "--board", "pickup", "--out", tmp / "diff.json")
+    diff = json.loads((tmp / "diff.json").read_text(encoding="utf-8"))
+    check(set(diff) >= {"missing", "duplicates", "price", "structure", "status", "extras"},
+          "--out writes the diff with all categories")
+    res = rec("--expected", q, "--listings", s, "--board", "pickup", "--out", tmp / "nodir" / "diff.json")
+    check(res.returncode == 2 and "cannot write the diff" in res.stderr, "a diff that cannot be written exits 2")
+
+    # 14. regressions a cross-review found, each pinned by its own input
+    check(module.normalize_spec("500ml*1瓶") != module.normalize_spec("500ml*2瓶"),
+          "spec labels keep their count, so a wrong spec row cannot hide behind the name fold")
+    res = rec("--expected", queue_file(tmp, "q14a.json", [want(20, "A", 3.0, "500ml*1瓶")]),
+              "--listings", snapshot(tmp, "l14a.json", [row("A", 3.0, [{"name": "500ml*2瓶", "price": 3.0}])],
+                                     board="pickup"), "--board", "pickup")
+    check("STRUCTURE - price matches but the spec rows do not: 1" in res.stdout,
+          "same price but 2-bottle rows where the plan says 1 bottle is a structure difference")
+    check(norm("洗发水*200ml") != norm("洗发水*400ml"),
+          "a trailing size like *400ml is not pack notation, so two shampoos do not collapse into one")
+    res = rec("--expected", queue_file(tmp, "q14c.json", [want(21, "A", 9.9, "500ml*1瓶")]),
+              "--listings", snapshot(tmp, "l14c.json", [row("A", 3.0, [{"name": "500ml*1瓶", "price": 3.0}],
+                                                             status="待审核")], board="pickup"), "--board", "pickup")
+    check("PRICE - name matches but the number does not: 1" in res.stdout
+          and "STATUS - found, but not live on the shelf: 1" in res.stdout,
+          "a price mismatch does not swallow the fact that the row is still awaiting review")
+    res = rec("--expected", queue_file(tmp, "q14d.json", [want(22, "G", 3.0, "500ml*1瓶")]),
+              "--listings", snapshot(tmp, "l14d.json", [row("G", 3.0, [{"name": "赠品", "price": 0},
+                                                                      {"name": "500ml*1瓶", "price": 3.0}])],
+                                     board="pickup"), "--board", "pickup")
+    check(res.returncode == 0, "a zero-price gift row does not drag the real unit price into a mismatch")
+    res = rec("--expected", queue_file(tmp, "q14e.json", [{"n": 23, "name": "C", "price1": 3.0, "v1": "s", "coupon": 1.25}]),
+              "--listings", snapshot(tmp, "l14e.json", [row("C", 3.0, [{"name": "s", "price": 3.0, "coupon": 1.2}])],
+                                     board="pickup"), "--board", "pickup")
+    check("coupon 期望 1.25 实际 1.20" in res.stdout, "a coupon change that never reached the shop is named")
+    res = rec("--expected", queue_file(tmp, "q14f.json", [want(24, "D", 3.0, "s")]),
+              "--listings", snapshot(tmp, "l14f.json", [row("D", 3.0, [{"name": "s", "price": 3.0}], ident="1"),
+                                                        row("D", 3.004, [{"name": "s", "price": 3.004}], ident="2")],
+                                     board="pickup"), "--board", "pickup")
+    check("DUPLICATE - same name and price listed more than once: 1" in res.stdout,
+          "two rows within the price tolerance are duplicates, not two products")
+    check("captured:" in rec("--expected", q, "--listings", s, "--board", "pickup").stdout,
+          "the header states when the snapshot was taken")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -298,6 +534,7 @@ def main() -> int:
         test_images(tmp)
         test_queue(tmp, profile)
         test_xlsx(tmp)
+        test_reconcile(tmp)
     if failures:
         print(f"\n{len(failures)} smoke failures:")
         for f in failures:

@@ -1,0 +1,44 @@
+{
+  "board": "pickup",
+  "capturedAt": "2026-01-04T18:00:00+08:00",
+  "source": "https://admin.example.com/store/pickup/product-list?page=1..35",
+  "total": 3,
+  "items": [
+    {
+      "id": "SPU202601011058190914",
+      "name": "示例商品500ml",
+      "status": "on-sale",
+      "specs": [
+        {"name": "500ml*1瓶", "price": 3.0, "points": 0.8, "stock": 10000},
+        {"name": "15瓶*箱", "price": 45.0, "points": 12.0, "stock": 10000}
+      ]
+    },
+    {
+      "id": "SPU202601020930112233",
+      "name": "示例商品 330ml（箱*24罐）",
+      "status": "待审核",
+      "specs": [
+        {"name": "330ml*1罐", "price": 3.5, "points": 1.4},
+        {"name": "24罐*箱", "price": 84.0, "points": 33.6}
+      ]
+    },
+    {
+      "id": "SKU-ONLY-PRICE",
+      "name": "整只示例商品",
+      "status": "销售中",
+      "price": 238,
+      "createdAt": "2026-01-03 12:00",
+      "specs": [
+        {"name": "约2000g*1只", "price": 238, "points": 88}
+      ]
+    }
+  ],
+  "_notes": [
+    "This is the shape the agent writes after scraping the product list; reconcile.py only reads it.",
+    "`total` is optional, but when present it is checked against len(items) - a missed page becomes a fake MISSING row, and a fake MISSING row is how a duplicate listing gets created.",
+    "`board` may sit on the wrapper (whole file) or on each row; a row without one inherits the file value, then --board.",
+    "`status` may be the page's own wording - 待审核/销售中/已驳回/回收站 and on-sale/pending-review/rejected all map; anything unrecognised is reported instead of guessed.",
+    "`createdAt` is optional: when the id starts SPU + 14 digits, the creation time is read from it.",
+    "A row may carry a bare `price` instead of specs (single-spec products); reconcile wraps it into one spec row."
+  ]
+}

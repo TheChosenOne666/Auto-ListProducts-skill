@@ -242,6 +242,31 @@ def test_queue(tmp: Path, profile: Path) -> None:
               "--out", tmp / "q4.json")
     check(res.returncode == 1 and "SUSPECT" in res.stdout, "a negative coupon aborts with the numbers printed")
 
+    # the two things the sandbox rehearsal could not do: a retail-only batch, and a two-level path
+    retail_only = queue_file(tmp, "q12.json", [{"n": 30, "name": "Retail Only", "size": "500ml",
+                                                "unit": "bottle", "retail": 3.0, "cat": "SODA", "img": "r.jpg"}])
+    shallow_cats = tmp / "categories-shallow.json"
+    shallow_cats.write_text(json.dumps({"SODA": {"l2": "Drink"}}, ensure_ascii=False), encoding="utf-8")
+    res = run("make_queue.py", "--profile", profile, "--products", retail_only, "--categories", shallow_cats,
+              "--out", tmp / "q12-out.json", "--no-case-sku", "--points", "none")
+    check(res.returncode == 0, "a retail-only batch builds a queue when nothing consumes the cost")
+    built = json.loads((tmp / "q12-out.json").read_text(encoding="utf-8"))
+    check("coupon" not in built[0] and "v2" not in built[0], "no coupon or case row is invented for cost-free data")
+    check(built[0]["expectCat"] == "RootCat / Drink" and "l3" not in built[0],
+          "a two-level category path is legal, not an unknown key")
+    res = run("make_queue.py", "--profile", profile, "--products", retail_only, "--categories", shallow_cats,
+              "--out", tmp / "q12b.json")
+    check(res.returncode == 1 and "supply/per are only needed" in res.stdout,
+          "when the profile does need cost, the refusal says why instead of only naming missing keys")
+    varying_root = tmp / "categories-varying.json"
+    varying_root.write_text(json.dumps({"SODA": {"l1": "Drinks", "l2": "Soda"}}, ensure_ascii=False),
+                            encoding="utf-8")
+    res = run("make_queue.py", "--profile", profile, "--products", retail_only, "--categories", varying_root,
+              "--out", tmp / "q13.json", "--no-case-sku", "--points", "none")
+    built = json.loads((tmp / "q13.json").read_text(encoding="utf-8"))
+    check(res.returncode == 0 and built[0]["expectCat"] == "Drinks / Soda",
+          "a catalogue whose first level varies overrides the root per key")
+
 
 def test_xlsx(tmp: Path) -> None:
     path = tmp / "sheet.xlsx"
@@ -774,6 +799,36 @@ def test_verify(tmp: Path) -> None:
                                        ensure_ascii=False), encoding="utf-8")
     res = run_v("--profile", no_floor_path, "--actual", small_images, "--queue", queue, "--n", 1)
     check(res.returncode == 0, "an explicit minBytes of 0 means no floor, not the default 50 KB")
+
+    # 16. the sandbox's own trap: a column the page requires that the plan says nothing about
+    weight_profile = json.loads(profile.read_text(encoding="utf-8"))
+    weight_profile["fields"]["spec"]["skuFieldOrder"] = ["price", "stock", "points", "weight"]
+    weight_profile_path = tmp / "profile-weightcol.json"
+    weight_profile_path.write_text(json.dumps(weight_profile, ensure_ascii=False), encoding="utf-8")
+    no_weight = tmp / "actual-no-weight.json"
+    no_weight.write_text(json.dumps(vactual(), ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", weight_profile_path, "--actual", no_weight, "--queue", queue, "--n", 1)
+    check(res.returncode == 1 and "FAIL sku numbers filled" in res.stdout and "weight" in res.stdout,
+          "a declared column left empty blocks the submit even when the plan carries no value for it")
+    with_weight = tmp / "actual-weight.json"
+    with_weight.write_text(json.dumps(vactual(skuRows=[{"price": 3.0, "stock": 10000, "points": 0.8, "weight": 560},
+                                                       {"price": 45.0, "stock": 10000, "points": 12.0,
+                                                        "weight": 8400}]),
+                                      ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", weight_profile_path, "--actual", with_weight, "--queue", queue, "--n", 1)
+    check(res.returncode == 0 and "PASS sku numbers filled" in res.stdout,
+          "filling every declared column clears the gate, which is what the real form demanded")
+    toggle_profile = json.loads(profile.read_text(encoding="utf-8"))
+    toggle_profile["fields"]["spec"]["skuFieldOrder"] = ["price", "stock", "points", "listed"]
+    toggle_path = tmp / "profile-toggle.json"
+    toggle_path.write_text(json.dumps(toggle_profile, ensure_ascii=False), encoding="utf-8")
+    toggle_actual = tmp / "actual-toggle.json"
+    toggle_actual.write_text(json.dumps(vactual(skuRows=[{"price": 3.0, "stock": 10000, "points": 0.8, "listed": True},
+                                                          {"price": 45.0, "stock": 10000, "points": 12.0,
+                                                           "listed": True}]),
+                                        ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", toggle_path, "--actual", toggle_actual, "--queue", queue, "--n", 1)
+    check(res.returncode == 0, "a toggle column is not demanded as a number")
 
     gbk_actual = tmp / "actual-gbk.json"
     gbk_actual.write_bytes(json.dumps(vactual(), ensure_ascii=False).encode("gbk"))

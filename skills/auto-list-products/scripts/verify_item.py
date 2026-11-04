@@ -210,6 +210,23 @@ def verify_rows(results, item, actual, values, profile, tolerance):
     plan = plan_rows(item, values or [])
     check(results, "sku rows", "PASS", f"{len(aligned)} rows, fields {order or 'unlabelled'}")
 
+    # every column the profile declares has to carry a value on every row: a page refuses an empty
+    # weight exactly as loudly as an empty price, and a gate that only checks the columns it happens
+    # to know about is what let the sandbox run pass and then get rejected by the form
+    missing_cells = []
+    for idx, row in enumerate(aligned):
+        for column in order:
+            if isinstance(row.get(column), bool):
+                continue          # a toggle column is not a number
+            if num(row.get(column)) is None:
+                missing_cells.append(f"row {idx + 1} {column}")
+    if not order:
+        check(results, "sku numbers filled", "SKIP", "profile declares no skuFieldOrder")
+    elif missing_cells:
+        check(results, "sku numbers filled", "FAIL", "no value read back for " + ", ".join(missing_cells))
+    else:
+        check(results, "sku numbers filled", "PASS", f"every of {order} carries a value")
+
     for field, index in (("price", 0), ("points", 1)):
         expected = [(idx, want) for idx, (price, points) in sorted(plan.items())
                     for want in [(price, points)[index]] if want is not None]

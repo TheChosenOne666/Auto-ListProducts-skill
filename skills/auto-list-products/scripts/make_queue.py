@@ -10,8 +10,12 @@ products.json (list, one object per product):
    "cu": "箱", "supply": 31.5, "retail": 3.0, "cat": "TEA", "img": "示例商品500ml.jpg"}
   optional per-product overrides: "stock", "pt1", "pt2", "sales", "fav", "skip": true
 
-categories.json (map of category key -> platform path):
-  {"TEA": {"l2": "<level-2 label>", "l3": "<level-3 label>"}}
+categories.json (map of category key -> platform path; l3 is optional because real trees are not
+uniformly three levels deep - 酒水饮料 / 汽水 is a valid leaf - and l1 overrides the profile's root
+when the catalogue's first level varies rather than sitting under one fixed root):
+  {"TEA": {"l2": "<level-2 label>", "l3": "<level-3 label>"},
+   "SODA": {"l2": "<level-2 label>"},
+   "NOODLE": {"l1": "<level-1 label>", "l2": "<level-2 label>"}}
 
 Output queue.json entries carry everything the browser step needs for one item:
   v1/v2 (spec values), price1/pt1 (single unit), price2/pt2 (full case), stock, specName,
@@ -27,6 +31,8 @@ Overrides (each wins over the profile)
   --stock 10000           --spec-name 规格         --board pickup
 
 Policy notes
+  * `supply` and `per` are required only when something consumes them: a case SKU row, coupon-derived
+    points, or a coupon floor. A retail-only dictated batch still builds - it just carries no coupon.
   * Nothing is skipped by default: `business.minCoupon` of 0 means no coupon floor.
   * points are emitted per `business.pointsMode`: `none` (omit), `coupon` (derive, one
     decimal by default), `fixed` (only per-product pt1/pt2, and a product missing them is
@@ -53,7 +59,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-REQUIRED_KEYS = ["n", "name", "size", "unit", "per", "supply", "retail", "cat", "img"]
+REQUIRED_KEYS = ["n", "name", "size", "unit", "retail", "cat", "img"]
+COST_KEYS = ["per", "supply"]
 
 
 def load(path: str):
@@ -121,10 +128,15 @@ def main() -> int:
 
     queue, skipped, unknown, problems, suspects, dupes, clashes, seen = [], [], [], [], [], [], [], {}
 
+    needs_cost = case_sku or points_mode == "coupon" or min_coupon > 0
+
     for p in products:
-        missing = [k for k in REQUIRED_KEYS if p.get(k) in (None, "")]
+        required = REQUIRED_KEYS + (COST_KEYS if needs_cost else [])
+        missing = [k for k in required if p.get(k) in (None, "")]
         if missing:
-            problems.append((p.get("n"), p.get("name"), f"missing {missing}"))
+            problems.append((p.get("n"), p.get("name"), f"missing {missing}"
+                             + (" (supply/per are only needed for a case row, coupon-derived points or a coupon floor)"
+                                if any(k in COST_KEYS for k in missing) else "")))
             continue
         if only and p["n"] not in only:
             continue
@@ -132,24 +144,29 @@ def main() -> int:
             skipped.append((p["n"], p["name"], "flag"))
             continue
         cat = cats.get(p["cat"])
-        if not cat or not cat.get("l2") or not cat.get("l3"):
+        if not cat or not cat.get("l2"):
             unknown.append((p["n"], p["name"], p["cat"]))
             continue
+        # some trees are not three levels deep everywhere: 酒水饮料 / 汽水 is a valid leaf,
+        # and a catalogue whose first level varies overrides the profile's root per key with l1
+        levels = [cat.get("l1") or root, cat["l2"]] + ([cat["l3"]] if cat.get("l3") else [])
 
         try:
-            per, supply, retail = int(p["per"]), float(p["supply"]), float(p["retail"])
+            per = int(p["per"]) if p.get("per") not in (None, "") else None
+            supply = float(p["supply"]) if p.get("supply") not in (None, "") else None
+            retail = float(p["retail"])
         except (TypeError, ValueError) as exc:
             problems.append((p["n"], p["name"], f"bad number ({exc})"))
             continue
-        if per < 1:
+        if per is not None and per < 1:
             problems.append((p["n"], p["name"], f"`per` (units per case) must be >= 1, got {per}"))
             continue
 
-        coupon = round(retail - supply / per, 2)
-        if coupon <= 0 or coupon >= retail:
+        coupon = round(retail - supply / per, 2) if (supply is not None and per) else None
+        if coupon is not None and (coupon <= 0 or coupon >= retail):
             suspects.append((p["n"], p["name"], f"coupon={coupon} retail={retail} supply={supply} per={per}"))
             continue
-        if min_coupon > 0 and coupon < min_coupon:
+        if coupon is not None and min_coupon > 0 and coupon < min_coupon:
             skipped.append((p["n"], p["name"], coupon))
             continue
 
@@ -169,12 +186,16 @@ def main() -> int:
             "name": p["name"],
             "img": p["img"],
             "l2": cat["l2"],
-            "l3": cat["l3"],
-            "expectCat": separator.join([root, cat["l2"], cat["l3"]]),
+            "expectCat": separator.join(levels),
             "v1": v1,
             "price1": retail,
-            "coupon": coupon,
         }
+        if cat.get("l3"):
+            item["l3"] = cat["l3"]
+        if cat.get("l1"):
+            item["l1"] = cat["l1"]
+        if coupon is not None:
+            item["coupon"] = coupon
         if args.board:
             item["board"] = args.board
         if spec_name:
@@ -231,7 +252,7 @@ def main() -> int:
           f"counters={counters} caseSku={case_sku} stock={stock if stock is not None else '-'}")
     by_cat: dict[str, int] = {}
     for q in queue:
-        key = f"{q['l2']}/{q['l3']}"
+        key = "/".join([p for p in (q.get("l1"), q["l2"], q.get("l3")) if p])
         by_cat[key] = by_cat.get(key, 0) + 1
     for key, count in sorted(by_cat.items()):
         print(f"  {key}: {count}")

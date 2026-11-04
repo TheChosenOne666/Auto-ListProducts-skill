@@ -846,6 +846,131 @@ def test_verify(tmp: Path) -> None:
           "actual.example.json documents every field the script reads")
 
 
+def test_boards(tmp: Path) -> None:
+    folder = tmp / "boards"
+    folder.mkdir(exist_ok=True)
+    tmp = folder
+
+    base = vprofile(mode="fill-and-submit")
+    base["probedAt"] = "2026-11-04T22:40:00+08:00"
+    base["fields"]["submit"] = {"button": {"by": "role+name", "value": "提交审核"},
+                                "confirmButton": {"by": "role+name", "value": "确定"},
+                                "successWhen": "route-changed", "successDetail": "#/new"}
+    base["fields"]["optional"] = {"points": {"locator": {"by": "css", "value": "[data-field=points]"},
+                                             "decimals": 1}}
+    base["business"]["pointsMode"] = "coupon"
+    base["defaults"]["rootCategory"] = "自提根"
+    base["boards"] = {
+        "pickup": {"label": "到店自提", "form": {"newUrl": "https://t/#/p", "listUrl": "https://t/#/pl"}},
+        "express": {"label": "快递发货",
+                    "form": {"newUrl": "https://t/#/e", "listUrl": "https://t/#/el"},
+                    "defaults": {"rootCategory": "快递根", "checkedToStart": []},
+                    "fields": {"without": ["scope"],
+                               "spec": {"skuFieldOrder": ["price", "stock", "points", "weight", "volume"]}},
+                    "business": {"couponOffset": -1}}}
+    prof = tmp / "profile-boards.json"
+    prof.write_text(json.dumps(base, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    products = queue_file(tmp, "products-boards.json",
+                          [{"n": 1, "name": "茶 A", "size": "500ml", "unit": "瓶", "per": 15, "cu": "箱",
+                            "supply": 10.5, "retail": 3.0, "cat": "TEA", "img": "a.jpg"}])
+    cats = tmp / "cats-boards.json"
+    cats.write_text(json.dumps({"TEA": {"l2": "饮料", "l3": "茶"}}, ensure_ascii=False), encoding="utf-8")
+
+    res = run("make_queue.py", "--profile", prof, "--products", products, "--categories", cats,
+              "--out", tmp / "qb-p.json", "--board", "pickup")
+    check(res.returncode == 0, "board pickup builds")
+    item_p = json.loads((tmp / "qb-p.json").read_text(encoding="utf-8"))[0]
+    res = run("make_queue.py", "--profile", prof, "--products", products, "--categories", cats,
+              "--out", tmp / "qb-e.json", "--board", "express")
+    item_e = json.loads((tmp / "qb-e.json").read_text(encoding="utf-8"))[0]
+    check(item_p["expectCat"].startswith("自提根 / ") and item_e["expectCat"].startswith("快递根 / "),
+          "each section uses its own category root")
+    check(item_p["price1"] == item_e["price1"] == 3.0, "the retail price never moves with the board")
+    check(item_p["coupon"] == 2.3 and item_e["coupon"] == 1.3, "the coupon carries the section offset")
+    check(item_e["pt1"] == 1.3, "points derived from the coupon follow the offset")
+    check(item_p["board"] == "pickup" and item_e["board"] == "express", "items are tagged for the audit")
+
+    crushed = json.loads(json.dumps(base))
+    crushed["boards"]["express"]["business"]["couponOffset"] = -9
+    crushed_path = tmp / "profile-crushed.json"
+    crushed_path.write_text(json.dumps(crushed, ensure_ascii=False), encoding="utf-8")
+    res = run("make_queue.py", "--profile", crushed_path, "--products", products, "--categories", cats,
+              "--out", tmp / "qb-crushed.json", "--board", "express")
+    check(res.returncode == 1 and "offset -9" in res.stdout and not (tmp / "qb-crushed.json").exists(),
+          "an offset that crushes the coupon aborts, names the product and writes no queue")
+
+    res = run("make_queue.py", "--profile", prof, "--products", products, "--categories", cats,
+              "--out", tmp / "qb-bad.json", "--board", "courier")
+    check(res.returncode == 2 and "defines: ['express', 'pickup']" in res.stderr,
+          "an unknown board is an input error that lists the real ones")
+    flat = json.loads(json.dumps(base))
+    flat.pop("boards")
+    flat_path = tmp / "profile-flat.json"
+    flat_path.write_text(json.dumps(flat, ensure_ascii=False), encoding="utf-8")
+    res = run("make_queue.py", "--profile", flat_path, "--products", products, "--categories", cats,
+              "--out", tmp / "qb-flat.json", "--board", "pickup")
+    check(res.returncode == 2 and "defines: none" in res.stderr,
+          "asking for a board on a single-section profile is refused, not ignored")
+    res = run("make_queue.py", "--profile", flat_path, "--products", products, "--categories", cats,
+              "--out", tmp / "qb-flat2.json")
+    check(res.returncode == 0, "the same profile still works with no board at all (backward compatible)")
+
+    res = run("check_profile.py", prof)
+    check(res.returncode == 0 and "boards        : 2 section(s)" in res.stdout
+          and "[express]" in res.stdout and "absent on this section" in res.stdout
+          and "coupon     : -1 versus the base coupon" in res.stdout,
+          "the validator summarises each section instead of blurring them together")
+    broken = json.loads(json.dumps(base))
+    broken["boards"]["express"]["fields"]["unknownThing"] = {}
+    broken["boards"]["express"]["business"]["couponOffset"] = "five"
+    broken["boards"]["express"].pop("label")
+    broken_path = tmp / "profile-broken-boards.json"
+    broken_path.write_text(json.dumps(broken, ensure_ascii=False), encoding="utf-8")
+    res = run("check_profile.py", broken_path, "--quiet")
+    check(res.returncode == 1 and "label missing" in res.stdout and "unknown override 'unknownThing'" in res.stdout
+          and "couponOffset must be a number" in res.stdout,
+          "a bad board block is refused with the offending keys named")
+
+    queue_b = queue_file(tmp, "queue-boards.json",
+                         [{"n": 1, "name": "茶 A", "price1": 3.0, "price2": 45.0,
+                           "v1": "500ml*1瓶", "v2": "15瓶*箱", "board": "express"}])
+    express_actual = tmp / "actual-express.json"
+    express_actual.write_text(json.dumps({
+        "name": "茶 A", "category": "快递根 / 饮料 / 茶", "specName": "规格",
+        "specValues": ["500ml*1瓶", "15瓶*箱"],
+        "skuRows": [{"price": 3.0, "stock": 10000, "points": 1.3, "weight": 560, "volume": 0.01},
+                    {"price": 45.0, "stock": 10000, "points": 19.5, "weight": 8400, "volume": 0.2}],
+        "checked": 0, "images": [{"tray": "main", "bytes": 168000}, {"tray": "detail", "bytes": 201000}],
+        "submitted": False},
+        ensure_ascii=False), encoding="utf-8")
+    res = subprocess.run([sys.executable, str(SCRIPTS / "verify_item.py"), "--profile", prof, "--board", "express",
+                          "--actual", express_actual, "--queue", queue_b, "--n", "1"],
+                         capture_output=True, text=True, encoding="utf-8")
+    check(res.returncode == 0 and "SKIP scope" in res.stdout
+          and "section 快递发货 has no scope field on its form" in res.stdout,
+          "the gate skips the field this section does not have, and says which section")
+    thin = json.loads(express_actual.read_text(encoding="utf-8"))
+    for row in thin["skuRows"]:
+        row.pop("weight")
+    thin_path = tmp / "actual-express-thin.json"
+    thin_path.write_text(json.dumps(thin, ensure_ascii=False), encoding="utf-8")
+    res = subprocess.run([sys.executable, str(SCRIPTS / "verify_item.py"), "--profile", prof, "--board", "express",
+                          "--actual", thin_path, "--queue", queue_b, "--n", "1"],
+                         capture_output=True, text=True, encoding="utf-8")
+    check(res.returncode == 1 and "FAIL sku numbers filled" in res.stdout and "weight" in res.stdout,
+          "the express ruler demands the weight the express form demands")
+    res = subprocess.run([sys.executable, str(SCRIPTS / "verify_item.py"), "--profile", prof, "--board", "pickup",
+                          "--actual", express_actual, "--queue", queue_b, "--n", "1"],
+                         capture_output=True, text=True, encoding="utf-8")
+    check(res.returncode == 1 and "FAIL scope" in res.stdout,
+          "measuring the express form with the pickup ruler is caught the other way round too")
+    res = subprocess.run([sys.executable, str(SCRIPTS / "verify_item.py"), "--profile", prof, "--board", "nope",
+                          "--actual", express_actual, "--queue", queue_b, "--n", "1"],
+                         capture_output=True, text=True, encoding="utf-8")
+    check(res.returncode == 2 and "unknown --board" in res.stderr, "the gate refuses an unknown board")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -856,6 +981,7 @@ def main() -> int:
         test_xlsx(tmp)
         test_reconcile(tmp)
         test_verify(tmp)
+        test_boards(tmp)
     if failures:
         print(f"\n{len(failures)} smoke failures:")
         for f in failures:

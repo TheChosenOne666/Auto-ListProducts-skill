@@ -25,8 +25,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 REQUIRED = [
     "platform",
-    "form.newUrl",
-    "form.listUrl",
     "image.trays",
     "fields.name.locator",
     "fields.category.kind",
@@ -39,6 +37,11 @@ REQUIRED = [
     "defaults.rootCategory",
     "business.mode",
 ]
+# form.newUrl / form.listUrl are required at the top level OR in every board - see check_boards()
+BOARD_SECTIONS = {"label", "form", "defaults", "fields", "business"}
+BOARD_FIELD_KEYS = {"without", "spec", "name", "category", "scope", "optional", "submit"}
+BOARD_DEFAULT_KEYS = {"stock", "specName", "rootCategory", "checkedToStart"}
+BOARD_BUSINESS_KEYS = {"mode", "pointsMode", "minCoupon", "counters", "caseSku", "couponOffset"}
 LOCATOR_PATHS = [
     "fields.name.locator",
     "fields.category.locator",
@@ -113,6 +116,56 @@ def check_trays(doc, errors, warnings):
     return trays
 
 
+def check_boards(doc, errors, warnings):
+    """Validate the optional per-section overrides and say which URLs come from where."""
+    boards = doc.get("boards")
+    if boards is None:
+        for path in ("form.newUrl", "form.listUrl"):
+            if not get(doc, path):
+                errors.append(f"missing: {path} (or give every board its own)")
+        return {}
+    if not isinstance(boards, dict) or not boards:
+        errors.append("boards must be a non-empty object keyed by board name")
+        return {}
+    for key, board in boards.items():
+        tag = f"boards.{key}"
+        if key.startswith("_"):
+            continue          # a comment key is documentation, not a section
+        if not isinstance(board, dict):
+            errors.append(f"{tag}: want an object")
+            continue
+        if not board.get("label"):
+            errors.append(f"{tag}.label missing - the user has to recognise the section")
+        for section in board:
+            if section in ("_comment",):
+                continue
+            if section not in BOARD_SECTIONS:
+                errors.append(f"{tag}: unknown section {section!r} (allowed: {sorted(BOARD_SECTIONS)})")
+        for section, allowed in (("fields", BOARD_FIELD_KEYS), ("defaults", BOARD_DEFAULT_KEYS),
+                                 ("business", BOARD_BUSINESS_KEYS)):
+            for name in (board.get(section) or {}):
+                if name not in allowed:
+                    errors.append(f"{tag}.{section}: unknown override {name!r} (allowed: {sorted(allowed)})")
+        form = board.get("form") or {}
+        if form and (not form.get("newUrl") or not form.get("listUrl")):
+            errors.append(f"{tag}.form needs both newUrl and listUrl")
+        offset = (board.get("business") or {}).get("couponOffset")
+        if offset is not None and (not isinstance(offset, (int, float)) or isinstance(offset, bool)):
+            errors.append(f"{tag}.business.couponOffset must be a number, got {offset!r}")
+        without = (board.get("fields") or {}).get("without")
+        if without is not None and not isinstance(without, list):
+            errors.append(f"{tag}.fields.without must be a list of field names")
+    if not any((b.get("form") or {}).get("newUrl") for b in boards.values() if isinstance(b, dict)) \
+            and not get(doc, "form.newUrl"):
+        errors.append("no form.newUrl anywhere: neither the top level nor any board gives one")
+    if not get(doc, "form.newUrl"):
+        missing = [k for k, b in boards.items()
+                   if isinstance(b, dict) and not (b.get("form") or {}).get("newUrl")]
+        if missing:
+            errors.append(f"boards without a form.newUrl while the top level has none: {sorted(missing)}")
+    return boards
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("profile")
@@ -136,6 +189,7 @@ def main() -> int:
         check_locator(doc, path, errors)
 
     trays = check_trays(doc, errors, warnings)
+    boards = check_boards(doc, errors, warnings)
 
     mode = get(doc, "business.mode")
     if mode and mode not in MODES:
@@ -203,6 +257,30 @@ def main() -> int:
                 print(f"    - {tray.get('key')}: {tray.get('label') or '-'}"
                       f"  bind={tray.get('bind', 'product')} crop={tray.get('crop', 'square')}"
                       f" max={tray.get('maxCount', 1)}{' (optional)' if tray.get('optional') else ''}")
+        if boards:
+            top_fields = (doc.get("fields") or {}).get("spec", {}).get("skuFieldOrder") or []
+            real = {k: b for k, b in boards.items() if isinstance(b, dict)}
+            print(f"  boards        : {len(real)} section(s) - --board selects one")
+            for key, board in sorted(real.items()):
+                if not isinstance(board, dict):
+                    continue
+                b_form = board.get("form") or {}
+                b_def = board.get("defaults") or {}
+                b_fields = board.get("fields") or {}
+                b_biz = board.get("business") or {}
+                print(f"    [{key}] {board.get('label')}")
+                print(f"      new form   : {b_form.get('newUrl') or get(doc, 'form.newUrl')}")
+                print(f"      list       : {b_form.get('listUrl') or get(doc, 'form.listUrl')}")
+                print(f"      root cat   : {b_def.get('rootCategory') or get(doc, 'defaults.rootCategory')}")
+                scope_value = ((b_fields.get("scope") or {}).get("value")
+                               or get(doc, "fields.scope.value") or "-")
+                print(f"      scope      : "
+                      f"{'absent on this section' if 'scope' in (b_fields.get('without') or []) else scope_value}")
+                order = b_fields.get("spec", {}).get("skuFieldOrder") or top_fields
+                print(f"      sku order  : {order}")
+                print(f"      pre-checks : {b_def.get('checkedToStart', get(doc, 'defaults.checkedToStart'))}")
+                if "couponOffset" in b_biz:
+                    print(f"      coupon     : {b_biz['couponOffset']:+g} versus the base coupon")
         notes = get(doc, "notes") or []
         if notes:
             print("  notes:")

@@ -95,6 +95,25 @@
     "counters": false,
     "caseSku": true
   },
+  "boards": {
+    "_comment": "optional - delete this whole block on a single-section backend. --board <key> picks one: its form URLs, root category, field set, SKU column order, pre-checked controls and coupon offset override the top level; anything not repeated here falls back to it.",
+    "pickup": {
+      "label": "<section A label, e.g. 到店自提>",
+      "form": {"newUrl": "<section A create form URL>", "listUrl": "<section A list URL>"},
+      "defaults": {"rootCategory": "<section A category root>"},
+      "fields": {"scope": {"value": "<default scope option for this section>"}}
+    },
+    "express": {
+      "label": "<section B label, e.g. 快递发货>",
+      "form": {"newUrl": "<section B create form URL>", "listUrl": "<section B list URL>"},
+      "defaults": {"rootCategory": "<section B category root>", "checkedToStart": []},
+      "fields": {
+        "without": ["scope"],
+        "spec": {"skuFieldOrder": ["price", "stock", "points", "weight", "volume", "listed"]}
+      },
+      "business": {"couponOffset": -5}
+    }
+  },
   "notes": [
     "<anything surprising found while probing: hidden required fields, dialogs, quirks>"
   ]

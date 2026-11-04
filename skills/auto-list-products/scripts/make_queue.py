@@ -30,6 +30,11 @@ Overrides (each wins over the profile)
   --display-counters      --no-case-sku           --only 5,7,8
   --stock 10000           --spec-name 规格         --board pickup
 
+--board is stronger than an override: when the profile declares `boards`, picking one merges that
+section's form URLs, root category, field set, SKU column order, pre-checked controls and
+`couponOffset` over the top level, and tags every item. Retail prices never move with a board -
+only the coupon and what derives from it.
+
 Policy notes
   * `supply` and `per` are required only when something consumes them: a case SKU row, coupon-derived
     points, or a coupon floor. A retail-only dictated batch still builds - it just carries no coupon.
@@ -84,6 +89,43 @@ def case_label(template: str, per: int, unit: str, cu: str | None) -> str:
     return template.format(**values)
 
 
+class ProfileError(Exception):
+    """The profile cannot answer what was asked of it - an input problem, not a data disagreement."""
+
+
+def board_view(profile: dict, board: str | None) -> dict:
+    """Merge one section's overrides over the top level; a single-section profile is unaffected."""
+    view = {"label": None,
+            "form": dict(profile.get("form") or {}),
+            "defaults": dict(profile.get("defaults") or {}),
+            "fields": dict(profile.get("fields") or {}),
+            "business": dict(profile.get("business") or {}),
+            "without": []}
+    if not board:
+        return view
+    boards = {k: v for k, v in (profile.get("boards") or {}).items() if isinstance(v, dict)}
+    if board not in boards:
+        raise ProfileError(f"unknown --board {board!r}; this profile defines: {sorted(boards) or 'none'}")
+    over = boards[board]
+    view["label"] = over.get("label")
+    for section in ("form", "defaults", "business"):
+        view[section].update(over.get(section) or {})
+    fields = over.get("fields") or {}
+    view["without"] = list(fields.get("without") or [])
+    for name, value in fields.items():
+        if name == "without":
+            continue
+        if isinstance(value, dict) and isinstance(view["fields"].get(name), dict):
+            merged = dict(view["fields"][name])
+            merged.update(value)
+            view["fields"][name] = merged
+        else:
+            view["fields"][name] = value
+    for name in view["without"]:
+        view["fields"].pop(name, None)
+    return view
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", required=True, help="profile.json from the probe phase")
@@ -106,10 +148,16 @@ def main() -> int:
     products = load(args.products)
     cats = load(args.categories)
 
-    business = profile.get("business", {})
-    defaults = profile.get("defaults", {})
-    category_cfg = profile.get("fields", {}).get("category", {})
-    spec_cfg = profile.get("fields", {}).get("spec", {})
+    try:
+        view = board_view(profile, args.board)
+    except ProfileError as exc:
+        print(f"cannot build the queue: {exc}", file=sys.stderr)
+        return 2
+    business = view["business"]
+    defaults = view["defaults"]
+    category_cfg = view["fields"].get("category", {})
+    spec_cfg = view["fields"].get("spec", {})
+    coupon_offset = business.get("couponOffset") or 0
 
     root = args.root or defaults.get("rootCategory")
     if not root:
@@ -118,7 +166,7 @@ def main() -> int:
     separator = category_cfg.get("expectedSeparator") or " / "
     case_template = spec_cfg.get("caseSkuLabel") or "{per}{unit}*{cu}"
     points_mode = args.points or business.get("pointsMode") or "none"
-    decimals = profile.get("fields", {}).get("optional", {}).get("points", {}).get("decimals", 1)
+    decimals = view["fields"].get("optional", {}).get("points", {}).get("decimals", 1)
     min_coupon = args.min_coupon if args.min_coupon is not None else (business.get("minCoupon") or 0.0)
     counters = True if args.display_counters else bool(business.get("counters", False))
     case_sku = False if args.no_case_sku else bool(business.get("caseSku", True))
@@ -162,9 +210,11 @@ def main() -> int:
             problems.append((p["n"], p["name"], f"`per` (units per case) must be >= 1, got {per}"))
             continue
 
-        coupon = round(retail - supply / per, 2) if (supply is not None and per) else None
+        base_coupon = round(retail - supply / per, 2) if (supply is not None and per) else None
+        coupon = round(base_coupon + coupon_offset, 2) if base_coupon is not None else None
         if coupon is not None and (coupon <= 0 or coupon >= retail):
-            suspects.append((p["n"], p["name"], f"coupon={coupon} retail={retail} supply={supply} per={per}"))
+            suspects.append((p["n"], p["name"], f"coupon={coupon} (base {base_coupon} "
+                                                f"offset {coupon_offset:+g}) retail={retail} supply={supply} per={per}"))
             continue
         if coupon is not None and min_coupon > 0 and coupon < min_coupon:
             skipped.append((p["n"], p["name"], coupon))
@@ -248,8 +298,10 @@ def main() -> int:
         json.dump(queue, fh, ensure_ascii=False, indent=1)
 
     print(f"queue {len(queue)} -> {args.out}")
-    print(f"profile: root={root} points={points_mode} minCoupon={min_coupon} "
-          f"counters={counters} caseSku={case_sku} stock={stock if stock is not None else '-'}")
+    section = f" board={args.board} ({view['label']})" if args.board else ""
+    print(f"profile{section}: root={root} points={points_mode} minCoupon={min_coupon} "
+          f"counters={counters} caseSku={case_sku} stock={stock if stock is not None else '-'} "
+          f"couponOffset={coupon_offset:+g}")
     by_cat: dict[str, int] = {}
     for q in queue:
         key = "/".join([p for p in (q.get("l1"), q["l2"], q.get("l3")) if p])

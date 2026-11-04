@@ -10,7 +10,11 @@ expensive mistake: a reviewed listing cannot be edited, it has to be deleted and
 Usage
   python verify_item.py --profile profile.json --queue queue.json --n 7 --actual actual.json
   python verify_item.py --profile profile.json --item item.json  --actual actual.json
-  options: --out verdict.json  --tolerance 0.005  --quiet
+  options: --out verdict.json  --tolerance 0.005  --quiet  --allow-extra-specs  --board express
+
+--board matters on a back office with sections: it swaps in that section's SKU column order,
+pre-checked controls and coupon policy, and drops the fields that section does not have - measuring an
+express form with the pickup ruler hides a required weight and invents a missing scope.
 
 actual.json is what the agent reads back off the form (see actual.example.json). Nothing here opens
 a browser or touches the shop: it compares three local files and is deterministic about it.
@@ -120,7 +124,11 @@ def verify_category(results, item, actual):
 def verify_scope(results, item, actual, profile):
     scope = profile.get("fields", {}).get("scope")
     if not scope or not scope.get("value"):
-        check(results, "scope", "SKIP", "profile declares no scope field on this form")
+        if "scope" in (profile.get("without") or []):
+            check(results, "scope", "SKIP",
+                  f"section {profile.get('boardLabel') or '?'} has no scope field on its form")
+        else:
+            check(results, "scope", "SKIP", "profile declares no scope field on this form")
         return
     want, got = str(scope["value"]), actual.get("scope")
     if got is None:
@@ -342,6 +350,42 @@ def verify_mode(results, actual, profile):
         check(results, "submit mode", "PASS", f"{mode}, submitted={submitted}")
 
 
+def board_profile(profile: dict, board: str | None) -> dict:
+    """One section's view of the profile: its overrides merged in, fields it lacks removed.
+
+    Same merge semantics as make_queue.board_view - shallow per section, deeper for `fields.spec` -
+    so the gate measures a form with that section's ruler and never another section's.
+    """
+    if not board:
+        return profile
+    boards = {k: v for k, v in (profile.get("boards") or {}).items() if isinstance(v, dict)}
+    if board not in boards:
+        raise InputError(f"unknown --board {board!r}; this profile defines: {sorted(boards) or 'none'}")
+    over = boards[board]
+    merged = dict(profile)
+    for section in ("form", "defaults", "business"):
+        value = dict(profile.get(section) or {})
+        value.update(over.get(section) or {})
+        merged[section] = value
+    fields = dict(profile.get("fields") or {})
+    for name, value in (over.get("fields") or {}).items():
+        if name == "without":
+            continue
+        if isinstance(value, dict) and isinstance(fields.get(name), dict):
+            deep = dict(fields[name])
+            deep.update(value)
+            fields[name] = deep
+        else:
+            fields[name] = value
+    without = list((over.get("fields") or {}).get("without") or [])
+    for name in without:
+        fields.pop(name, None)
+    merged["fields"] = fields
+    merged["boardLabel"] = over.get("label")
+    merged["without"] = without
+    return merged
+
+
 def verify(profile: dict, item: dict, actual: dict, tolerance: float, allow_extra: bool = False) -> list[dict]:
     results: list[dict] = []
     verify_name(results, item, actual, profile)
@@ -361,7 +405,8 @@ def verify(profile: dict, item: dict, actual: dict, tolerance: float, allow_extr
 def print_results(results: list[dict], item, quiet: bool) -> int:
     failed = [r for r in results if r["verdict"] == "FAIL"]
     skipped = [r for r in results if r["verdict"] == "SKIP"]
-    print(f"verify item #{item.get('n', '?')} {item.get('name', '')}")
+    print(f"verify item #{item.get('n', '?')} {item.get('name', '')}"
+          + (f"  [board {item['board']}]" if item.get("board") else ""))
     for row in results:
         if quiet and row["verdict"] == "PASS":
             continue
@@ -399,6 +444,7 @@ def main() -> int:
     ap.add_argument("--queue", help="queue.json to pick the item from")
     ap.add_argument("--n", type=int, help="the queue item number, with --queue")
     ap.add_argument("--item", help="a single queue item already extracted to a file")
+    ap.add_argument("--board", help="measure with this section's ruler (profile.boards key)")
     ap.add_argument("--tolerance", type=float, default=0.005, help="numeric tolerance (default 0.005)")
     ap.add_argument("--allow-extra-specs", action="store_true",
                     help="the product really has more variants than v1/v2 (colours, sizes); rows beyond the "
@@ -411,6 +457,7 @@ def main() -> int:
         profile = load_json(args.profile)
         if not isinstance(profile, dict) or "fields" not in profile:
             raise InputError(f"{args.profile}: not a profile (no fields section); run check_profile.py first")
+        profile = board_profile(profile, args.board)
         item = pick_item(args)
         actual = load_json(args.actual)
         if not isinstance(actual, dict):

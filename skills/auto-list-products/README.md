@@ -34,9 +34,11 @@ costs one guided probe, not a code change.
    category, path separator, case-row label template, points policy, coupon floor, display counters, stock
    and spec name. Same name + same retail is dropped as a duplicate; a missing value, unknown category key or
    impossible coupon aborts without writing a queue. Flags override the profile for one run only.
-7. **Fill loop.** For each job: fresh form, upload each tray the profile declares and verify the stored
-   bytes, fill name → category → scope → spec values → SKU rows, verify every field against the queue, submit
-   only in `fill-and-submit` mode, assert the route changed, persist `state.json`.
+7. **Fill loop.** For each job: fresh form, upload each tray the profile declares, fill name → category →
+   scope → spec values → SKU rows, then read the form back into `actual.json` and run `verify_item.py` — one
+   PASS/FAIL/SKIP line per rule (category path exact, spec order, SKU numbers, stored image bytes, pre-checked
+   count, submit mode). Exit 1 blocks the submit. Only in `fill-and-submit` mode does it then submit, accept the
+   confirmation and assert the route changed; progress persists in `state.json`.
 8. **Audit.** Scrape the product list into a snapshot (`listings.json`, with the platform's own row count in
    `total`), then `scripts/reconcile.py` compares plan against shop on name + price + spec structure and prints
    four lists — MISSING / DUPLICATE / PRICE / STRUCTURE — plus a status list for rows that exist but are not
@@ -47,15 +49,17 @@ costs one guided probe, not a code change.
 ```
 SKILL.md                        the run, the preflight, the fill loop, the gates
 profile.example.json            what the probe produces (trays, locators, defaults, business policy)
+actual.example.json             what to read off the filled form before the submit gate
 listings.example.json           what the audit reads back from the product list
 references/probe-checklist.md   the 11-step discovery procedure behind the probe
-references/browser-playbook.md  uploads, real input events, tab handoff, snapshot scraping
+references/browser-playbook.md  uploads, real input events, tab handoff, read-back, snapshot scraping
 references/pitfalls.md          failure catalogue: symptom → cause → fix
 scripts/check_profile.py        refuse a half-probed profile before touching products
 scripts/crop_square.py          square crops + blank and carousel-dot guards + contact sheet
 scripts/check_images.py         blank-image audit for local files or hosted URLs
 scripts/make_queue.py           facts + profile → queue
 scripts/fill_xlsx.py            append rows without breaking formulas
+scripts/verify_item.py          the pre-submit gate: per-rule PASS/FAIL/SKIP, exit 1 blocks the submit
 scripts/reconcile.py            plan vs shop: missing / duplicate / price / structure / status
 evals/evals.json                test briefs with expected behaviour
 ```

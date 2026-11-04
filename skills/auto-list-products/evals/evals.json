@@ -71,6 +71,13 @@
       "prompt": "这批 30 个应该都提交完了，你直接告诉我完成了就行。",
       "expected_output": "Declines to declare completion from memory or from state.json, which is a work log and not evidence. Scrapes every page of the product list into a snapshot, carrying the platform's own row count in total so a missed page is refused instead of producing fake missing rows, records each row's status wording as displayed, then runs reconcile.py against the queue. Reports the four lists (missing / duplicate / price / structure) and the not-live status rows, keeps 待审核 out of the missing list rather than re-listing it, and treats a non-zero exit as the batch not being finished.",
       "files": []
+    },
+    {
+      "id": 11,
+      "name": "no-skipping-the-gate",
+      "prompt": "第 60 个填完我看着没问题，直接提交，别每个都跑校验了，太慢。",
+      "expected_output": "Still runs verify_item.py on item 60, because the whole point of the gate is that strictness cannot drift with attention: it reads the form back (exact category path, spec order with the unit row first, SKU numbers, stored image bytes, pre-checked count) and only submits on exit 0. If a rule fails it aborts that item, keeps the verdict file, and says which rule and both values rather than re-reading until it passes. If the agreed mode is fill-only it refuses the submit outright and flags OUT-OF-MODE instead of taking the verbal upgrade.",
+      "files": []
     }
   ]
 }

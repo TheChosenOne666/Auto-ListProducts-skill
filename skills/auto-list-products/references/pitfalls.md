@@ -98,6 +98,20 @@ Cause: a submit that failed validation, an expired session mid-batch, or an edit
 listing all leave the log looking successful.
 Fix: run the queue against a fresh snapshot after every batch; the diff, not the log, is the record.
 
+## Verification strictness drifted halfway through the batch
+
+Symptom: the first twenty items were checked field by field; from item sixty the checks were "looks right".
+Cause: verification written ad hoc by the agent each round - attention and patience are not a control.
+Fix: `verify_item.py` runs the same rules on every item; if it exits 1, the item aborts. Anything you cannot
+express as a rule belongs in the profile, not in judgement.
+
+## A form was submitted when the agreed mode was fill-only
+
+Symptom: listings went to review that the user wanted to eyeball first.
+Cause: the mode was a sentence in the conversation, not a check at the moment of submit.
+Fix: the mode lives in `profile.business.mode`; `verify_item.py` fails with `OUT-OF-MODE` when the read-back
+says the form was submitted in fill-only mode.
+
 ## Queue disagrees with the profile
 
 Symptom: the numbers filled into the form are not what the user agreed to; the flags were re-typed per batch.

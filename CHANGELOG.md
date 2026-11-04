@@ -2,7 +2,8 @@
 
 ## 0.3.0 — 2026-11-04
 
-The audit stopped being a paragraph and became a check that can fail a batch.
+The audit stopped being a paragraph and became a check that can fail a batch — and so did the verification
+before each submit.
 
 - `scripts/reconcile.py`: compares the plan against a snapshot of the shop on **name + price + spec
   structure**, and prints MISSING / DUPLICATE / PRICE / STRUCTURE plus a status list for rows that exist but
@@ -23,7 +24,27 @@ The audit stopped being a paragraph and became a check that can fail a batch.
 - `reconcile.py` reads files only: no network module in the source, asserted in CI.
 - References: browser playbook gained a list-snapshot section; the catalogue gained three entries (a missed
   page faking missing rows, a pending-review row relisted, and a local log believed over the shop).
-- Evals: ten briefs.
+- `scripts/verify_item.py`: the pre-submit gate. The agent reads the filled form back into `actual.json` and
+  the script compares it against the queue item and the profile, printing one PASS/FAIL/SKIP line per rule -
+  name (including the form's own length limit, checked before anyone types), the **exact** category path
+  (a parent node whose label contains the leaf fails), scope, spec name, spec-value order (unit row before
+  case row, because rows can only be appended), SKU row count, price/stock/points per row, display counters,
+  every required upload slot against `image.minBytes` using the *stored* byte size, the pre-checked control
+  count, and the agreed submit mode. Exit 1 blocks the submit; `fill-only` with a submitted form fails as
+  `OUT-OF-MODE`. Verification written fresh each round drifts with attention - this makes rule sixteen the same
+  on product one and product one hundred and twenty.
+- `actual.example.json`: the read-back shape, including that SKU rows may be dumped as arrays and are then
+  keyed by `fields.spec.skuFieldOrder`.
+- Hardened against a cross-review of the first draft, each fix pinned by its own test: the gate no longer
+  blesses what it never compared (an undeclared extra spec row was passing - declare variants in the item's
+  `specValues` or pass `--allow-extra-specs`, which still prints which rows went unchecked); the category path
+  is matched segment by segment, so a breadcrumb rendered with `>` is not a false block while a missing level
+  stays a failure; an explicit `image.minBytes` of 0 means no floor instead of silently becoming 50 KB; a
+  non-UTF-8 input is an input error (exit 2) rather than a traceback that reads like a failed check; and a
+  `--out` that cannot be written warns instead of overwriting the verdict's exit code.
+- `SKILL.md` Phase 6 runs the gate instead of the sentence "verify every field"; the playbook gained a
+  read-back section and the catalogue two entries (strictness drifting mid-batch, submitting in fill-only mode).
+- Evals: eleven briefs.
 
 ## 0.2.0 — 2026-11-04
 

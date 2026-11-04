@@ -86,6 +86,27 @@ dragging it closes the dialog. Re-crop locally instead.
   differ.
 - Editing an existing product's spec values resets the numbers on those rows; re-fill and re-read them.
 
+## Read-back before submit
+
+Fill is not verified by remembering what you typed - it is verified by reading the form back and running
+`scripts/verify_item.py`. Dump these off the live form into `actual.json`:
+
+- the name field value and the whole selected category path (the read-back string the cascader shows, not the
+  one you clicked);
+- the scope/region value, the spec name, and the spec values **in the order the form shows them** - a case row
+  that ended up above the unit row cannot be reordered afterwards;
+- one entry per SKU row: price, stock, points, in that order (`fields.spec.skuFieldOrder`);
+- `bytes` for every upload slot: fetch the thumbnail's stored URL and take that length. The local file size is
+  not evidence - the platform re-encodes, and a white crop compresses to a few KB exactly the same way in and
+  out of the page;
+- how many controls are ticked, compared against what the probe recorded rather than re-clicked;
+- `submitted`: the page's actual state. In `fill-only` mode a true here is an out-of-mode failure, and that is
+  the one rule worth hard-blocking on.
+
+Run the gate after every product, including the hundred-and-twentieth. On exit 1: stop, save the verdict file
+with the item number in its name, and report which rule failed - do not try to make it pass by re-reading with
+looser eyes.
+
 ## Submit and resume
 
 - Click submit, accept the confirmation dialog, then assert the route left the form page.

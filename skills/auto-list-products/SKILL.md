@@ -143,9 +143,26 @@ Follow `references/browser-playbook.md`, driven by `profile.json`. Per product:
    `crop: square`, then verify the stored object's byte size against `image.minBytes` (a white crop is a few
    KB — delete, retry, then abort); tray-bound-to-`sku` cells get one image per spec row;
 3. fill name → category → scope → spec name → spec values → SKU rows (optional fields only as configured);
-4. verify every field against the queue; any mismatch aborts the item;
+4. read the form back into `actual.json` (`actual.example.json`) and run the pre-submit gate:
+
+   ```bash
+   python scripts/verify_item.py --profile profile.json --queue queue.json --n 7 --actual actual.json
+   ```
+
+   It checks name, the exact category path, scope, spec name, spec-value order, SKU row count, price,
+   stock and points per row, display counters, every required upload slot against `image.minBytes`, the
+   pre-checked control count, and the agreed submit mode. Exit 1 means **do not submit** - abort the item,
+   keep the verdict, report it; never "click anyway because it looks right".
+
+   The gate refuses to bless what it did not compare: a form holding a spec value the queue item never
+   declared fails. Products with real variants (colours, sizes) declare every one of them in the item's
+   `specValues` - then each row is matched by name - or the run passes `--allow-extra-specs`, which still
+   prints which rows went unchecked.
 5. submit only in `fill-and-submit` mode, accept the confirmation, assert the route changed;
 6. persist progress after each success; stop the batch on the first abort and report it.
+
+Verification strength must not drift between product 1 and product 120: that is the whole reason the gate
+is a script rather than a judgement call.
 
 `state.json` is the resume record, one entry per attempted item:
 
@@ -200,10 +217,12 @@ reconcile, because a submit that failed, an expired session, or a reviewed-and-f
 
 - `profile.example.json` — the profile the probe produces (upload trays, locators, defaults, business policy).
 - `listings.example.json` — the snapshot the audit reads back from the product list.
+- `actual.example.json` — what to read off the filled form before the submit gate runs.
 - `scripts/check_profile.py` — refuse a half-probed profile before touching products.
 - `scripts/crop_square.py` — square crops, blank + dot guards with `alt_src` fallback, contact sheet.
 - `scripts/check_images.py` — blank-image audit for local files or hosted URLs.
 - `scripts/make_queue.py` — facts + profile → queue (root, case label, points, counters, floor, stock).
+- `scripts/verify_item.py` — the pre-submit gate: one PASS/FAIL/SKIP line per rule, exit 1 blocks the submit.
 - `scripts/fill_xlsx.py` — append rows without breaking formulas.
 - `scripts/reconcile.py` — plan vs shop: missing / duplicate / price / structure, plus status and extras.
 - `references/probe-checklist.md` — the discovery procedure behind Phase 1.

@@ -19,11 +19,13 @@ costs one guided probe, not a code change.
    category, whether points exist and how they derive, display counters, case SKU and how that row is
    labelled, skip rule, submit mode. Write `profile.json` and validate it with `scripts/check_profile.py`.
 2. **Pilot.** Fill one product end-to-end with the profile. Only after it passes every assertion, scale.
-3. **Crop.** `scripts/crop_square.py` turns screenshots into square images and refuses two failure modes it
-   has seen in the wild: a crop of a product photo that never rendered (blank — never written, retried from
-   the `alt_src` screenshot first) and the carousel dots that leak into the bottom edge (capped off and
-   white-padded back to square). Per-resolution bounds accept an optional bottom edge for photo areas that
-   are shorter than the image width.
+3. **Crop / assemble.** Two shapes of intake. `scripts/crop_square.py` turns screenshots into square images
+   and refuses two failure modes it has seen in the wild: a crop of a product photo that never rendered
+   (blank — never written, retried from the `alt_src` screenshot first) and the carousel dots that leak into
+   the bottom edge (capped off and white-padded back to square). `scripts/prepare_images.py` handles the
+   other case — a product that already arrives with a square per colour, a few scene shots and a 3:4
+   infographic — laying them into the profile's slots: centre crop only, never pad, never blur, never
+   upscale, and a short set is reported as missing rather than filled with a repeat.
 4. **Extract.** Record title, size/unit, units per case, retail, case supply, image, category key. Unreadable
    values are asked, never guessed. Arithmetic is sanity-checked: a bundle is one unit, its cost is
    single-pack cost × packs.
@@ -51,11 +53,13 @@ SKILL.md                        the run, the preflight, the fill loop, the gates
 profile.example.json            what the probe produces (trays, locators, defaults, business policy)
 actual.example.json             what to read off the filled form before the submit gate
 listings.example.json           what the audit reads back from the product list
+products-images.example.json    the plan for laying a product's existing images into the slots
 references/probe-checklist.md   the 11-step discovery procedure behind the probe
 references/browser-playbook.md  uploads, real input events, tab handoff, read-back, snapshot scraping
 references/pitfalls.md          failure catalogue: symptom → cause → fix
 scripts/check_profile.py        refuse a half-probed profile before touching products
 scripts/crop_square.py          square crops + blank and carousel-dot guards + contact sheet
+scripts/prepare_images.py       existing assets → slots, centre-crop only, no padding, no invented fills
 scripts/check_images.py         blank-image audit for local files or hosted URLs
 scripts/make_queue.py           facts + profile → queue
 scripts/fill_xlsx.py            append rows without breaking formulas

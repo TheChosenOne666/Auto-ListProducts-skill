@@ -14,6 +14,7 @@
 | 环境自检 | 确认浏览器通道、真实输入能力、依赖、登录态、提交模式 | 无（agent 按 `SKILL.md` 执行） |
 | 探测 | `profile.json`：字段定位符、上传槽（商品图/详情图/规格图）、类目树、默认值、校验点、业务规则、多板块差异 | `check_profile.py` |
 | 收图 | 方图；白图不落盘（自动改用备图重裁），轮播圆点自动裁掉并补白 | `crop_square.py` |
+| 排图 | 商品自带的多张图（每色方图 / 场景图 / 3:4 信息图）按槽位排好：只中心裁、不补边、不放大、缺位只报不凑 | `prepare_images.py` |
 | 体检 | 本地或线上图片的白图检测（字节数 + 颜色数，按内容不按扩展名） | `check_images.py` |
 | 建队列 | 可断点续跑的 `queue.json`，规则全部取自 profile，同名同价自动去重 | `make_queue.py` |
 | 登记表 | 续填 Excel：自动定位空行、供货价保持数字、不打断公式、继承上一行样式 | `fill_xlsx.py` |
@@ -58,11 +59,12 @@ skills/auto-list-products/
 ├── profile.example.json           探测产出的平台档案
 ├── actual.example.json            提交前从表单回读的值（校验的输入）
 ├── listings.example.json          商品列表快照的形状（对账的输入）
+├── products-images.example.json   多张已有图片的排位计划（排图的输入）
 ├── references/                    探测清单、浏览器手法、踩坑清单
-├── scripts/                       七个可执行脚本（零 SDK 依赖）
+├── scripts/                       八个可执行脚本（零 SDK 依赖）
 └── evals/                         验收用例、执行手册 run-book、真实对照结果 results/
-sandbox/admin.html                 本地练习沙盒：假后台，可完整走一遍流程，坑全部写在 sandbox/README.md
-tests/smoke.py                     端到端冒烟测试：造夹具→跑七个脚本→断言产物
+sandbox/admin.html                 本地练习沙盒：假后台（含两个板块），可完整走一遍流程，坑全部写在 sandbox/README.md
+tests/smoke.py                     端到端冒烟测试：造夹具→跑八个脚本→断言产物
 tests/sandbox_static.py            沙盒静态检查：不联网、种子确定、快照形状与文档一致、埋坑与文档对得上
 .github/workflows/check-skills.yml 结构自检 + 冒烟 + 沙盒检查，Linux 与 Windows 各跑一遍
 ```

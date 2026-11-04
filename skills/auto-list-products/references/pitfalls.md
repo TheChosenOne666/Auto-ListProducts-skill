@@ -112,6 +112,22 @@ Cause: the mode was a sentence in the conversation, not a check at the moment of
 Fix: the mode lives in `profile.business.mode`; `verify_item.py` fails with `OUT-OF-MODE` when the read-back
 says the form was submitted in fill-only mode.
 
+## Padded or blurred to make a square
+
+Symptom: the product sits inside a white frame, or the edges of the photo are smeared into a background.
+Cause: someone "helpfully" fitted a non-square image by padding or blurring instead of cropping.
+Fix: not a fix - it was rejected outright. Product images go up as they are; when a slot demands a square,
+the only allowed operation is a centre crop (`prepare_images.py` does exactly that and never pads, blurs or
+upscales). If the composition cannot survive a centre crop, the source image is wrong, not the crop.
+
+## A short image set got filled up
+
+Symptom: a five-slot main gallery where the same scene photo appears twice, or an unrelated product's image
+sits in the set.
+Cause: the shortfall was treated as a problem to hide rather than to report - the page accepts it silently.
+Fix: `prepare_images.py` reports `short: {tray, missing}` and refuses to repeat a file within one slot group
+(exit 2 if the plan asks for it). Missing images are a question for the user, not a decision for the pipeline.
+
 ## Queue disagrees with the profile
 
 Symptom: the numbers filled into the form are not what the user agreed to; the flags were re-typed per batch.

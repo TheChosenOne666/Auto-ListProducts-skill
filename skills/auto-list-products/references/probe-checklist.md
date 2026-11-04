@@ -40,7 +40,8 @@ image cell) record:
 - its visible label and where it sits (product level or inside a SKU row),
 - whether picking a file opens a crop dialog (`square`), accepts any ratio (`any`), or uploads directly
   (`none`), and the label of the button that commits it,
-- how many files it takes (`maxCount`),
+- how many files it takes (`maxCount`) - that count and the crop rule are what `prepare_images.py` lays the
+  product's existing assets against, so record them from the form, not from what the catalogue wishes it were,
 - the thumbnail locator (that is where the stored URL is read back) and the delete locator,
 - whether it accepts the format you produce, or re-encodes it.
 

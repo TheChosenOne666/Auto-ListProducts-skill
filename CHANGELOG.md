@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.0 — 2026-11-04
+
+The other half of image intake: a product that arrives with images already, instead of a screenshot.
+
+- `scripts/prepare_images.py` lays existing assets (a square per colour, scene shots, a 3:4 infographic) into
+  the backend's upload slots. Slot counts and crop rules come from `profile.image.trays`
+  (`maxCount`, `crop`: `square` centre-crops, `any`/`none` upload as-is); the order comes from the plan
+  (`products-images.example.json`), and the manifest says which reason decided each order.
+- Three rules that were learned expensively are now enforced by code rather than by intent:
+  **centre crop only** - never pad, never blur, never add a background; **never upscale** - a small source
+  stays small and says `not-upscaled`; **never invent a slot** - a short set reports
+  `short: {tray, missing}` and using one file twice in a slot group is refused.
+- A cross-review of the first draft found a family of silent successes - none of them caught by the 24
+  assertions that were green - and each is now fixed with its own test: a product with no candidates
+  reported "every slot filled"; two products sharing a number wrote to the same filename and overwrote each
+  other while stdout counted both; a tray missing `maxCount` silently became a one-slot tray; a variant
+  without a label wrote the image but lost the SKU binding; a tray named `short` or `suspect` overwrote the
+  manifest's own fields (and one named `suspect` crashed); `single` only worked when the tray was literally
+  called `main`; `not-upscaled` was skipped for non-square sources; a control character in a label produced
+  an error naming the wrong file; a contact sheet was announced when nothing had been written; and an
+  exit-2 run still wrote its manifest, contradicting the design.
+- Contract tightened accordingly: every tray key always appears in the manifest (possibly empty), product
+  numbers and tray keys must be unique and non-reserved, tray definitions are validated before anything is
+  written, exit 2 writes nothing at all, and the SKU binding lives in `skuImages` so it cannot collide with
+  the conventional `sku` tray key.
+- `SKILL.md` Phase 2 splits into the two shapes of intake; the failure catalogue gained "padded or blurred
+  to make a square" and "a short image set got filled up"; the probe checklist records per-slot counts and
+  the square requirement as the input to this tool.
+- `tests/smoke.py` grew to 202 assertions, Linux and Windows both green.
+
 ## 0.5.0 — 2026-11-04
 
 Back offices with sections - self-pickup and courier, retail and wholesale - are one login but not one form.

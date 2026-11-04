@@ -94,15 +94,32 @@ python scripts/check_profile.py profile.json
 
 ## Phase 2 — Image intake
 
-Crop one square image per product with `scripts/crop_square.py`, mapping each source resolution to the
-photo area of the screenshot (`--windows "1440x3200:285,1280x2844:280:1500"`; phone screenshots carry a
-fixed title bar, and a bottom bound is white-padded back to a square):
+Two different problems wear the same name. Pick the right tool:
+
+**Screenshots of products** - crop one square image per product with `scripts/crop_square.py`, mapping each
+source resolution to the photo area (`--windows "1440x3200:285,1280x2844:280:1500"`; phone screenshots carry
+a fixed title bar, and a bottom bound is white-padded back to a square):
 
 - blank-crop detection (the photo never rendered in the screenshot) — a blank crop is **never written to
   disk**; the entry automatically falls back to its `alt_src` duplicate screenshot,
 - carousel-dot detection: dots at the bottom edge are capped off and white-padded back to square.
 
-Read the report; for every entry that is still blank or unusable, use another screenshot or ask the user to
+**Assets the product already has** (a square per colour, a few scene shots, a 3:4 spec infographic) -
+assemble them into the form's slots with `scripts/prepare_images.py`. Slot counts and crop rules come from
+`profile.image.trays`; the order comes from the plan (`products-images.example.json`):
+
+```bash
+python scripts/prepare_images.py --profile profile.json --products products.json \
+    --src assets --dst out --manifest manifest.json --sheet sheet.jpg
+```
+
+Three rules this tool enforces because they were learned expensively:
+- **centre crop is the only crop** - never pad, never blur, never add a background;
+- **never upscale** - a small source stays small and says `not-upscaled`;
+- **never invent a slot** - a short set reports `missing: n` instead of repeating an image, and using one
+  file twice in a slot group is refused outright.
+
+Read the reports either way; for every blank or unusable entry use another screenshot or ask the user to
 re-send it. Eyeball the contact sheet before uploading anything.
 
 ## Phase 3 — Fact extraction
@@ -234,11 +251,13 @@ reconcile, because a submit that failed, an expired session, or a reviewed-and-f
 - `actual.example.json` — what to read off the filled form before the submit gate runs.
 - `scripts/check_profile.py` — refuse a half-probed profile before touching products.
 - `scripts/crop_square.py` — square crops, blank + dot guards with `alt_src` fallback, contact sheet.
+- `scripts/prepare_images.py` — lay existing assets into the form's slots: centre crop only, never upscale, never fill a short slot.
 - `scripts/check_images.py` — blank-image audit for local files or hosted URLs.
 - `scripts/make_queue.py` — facts + profile → queue (root, case label, points, counters, floor, stock).
 - `scripts/verify_item.py` — the pre-submit gate: one PASS/FAIL/SKIP line per rule, exit 1 blocks the submit.
 - `scripts/fill_xlsx.py` — append rows without breaking formulas.
 - `scripts/reconcile.py` — plan vs shop: missing / duplicate / price / structure, plus status and extras.
+- `products-images.example.json` — the plan for assembling assets a product already has.
 - `references/probe-checklist.md` — the discovery procedure behind Phase 1.
 - `references/browser-playbook.md` — uploads, real input events, handoff, window hygiene.
 - `references/pitfalls.md` — failure catalogue with fixes.

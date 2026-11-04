@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>上架练习沙盒 · 非真实店铺</title>
+<style>
+  :root { --line:#dcdfe6; --text:#303133; --sub:#909399; --blue:#409eff; --green:#67c23a;
+          --orange:#e6a23c; --red:#f56c6c; --bg:#f5f7fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.6 "Microsoft YaHei","PingFang SC",system-ui,sans-serif; }
+  header { background:#2b2f3a; color:#fff; padding:10px 18px; display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+  header b { font-size:15px; }
+  header .warn { background:var(--orange); color:#252; padding:2px 8px; border-radius:3px; font-weight:600; }
+  header nav { display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
+  header a { color:#dfe4f0; text-decoration:none; padding:4px 10px; border:1px solid #4a5060; border-radius:4px; }
+  header a.on { background:var(--blue); border-color:var(--blue); color:#fff; }
+  header button { background:#3a3f4d; color:#dfe4f0; border:1px solid #4a5060; border-radius:4px; padding:4px 10px; cursor:pointer; }
+  main { padding:18px; max-width:1180px; margin:0 auto; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:6px; padding:16px 18px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:16px; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
+  .field { display:flex; flex-direction:column; gap:4px; min-width:220px; }
+  .field label { color:var(--sub); font-size:13px; }
+  .field label.req::before { content:"* "; color:var(--red); }
+  input, select, textarea { border:1px solid var(--line); border-radius:4px; padding:6px 8px; font-size:14px; background:#fff; color:var(--text); }
+  input:focus, select:focus { border-color:var(--blue); outline:none; }
+  input.bad, select.bad { border-color:var(--red); }
+  button.act { background:var(--blue); border-color:var(--blue); color:#fff; border-radius:4px; padding:6px 14px; cursor:pointer; }
+  button.ghost { background:#fff; border:1px solid var(--line); border-radius:4px; padding:5px 10px; cursor:pointer; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; font-size:13px; }
+  th { background:#fafafa; font-weight:600; }
+  td input { width:88px; }
+  .tag { padding:1px 8px; border-radius:10px; font-size:12px; border:1px solid; }
+  .tag.on-sale { color:var(--green); border-color:var(--green); background:#f2f8ee; }
+  .tag.pending-review { color:var(--orange); border-color:var(--orange); background:#fdf6ec; }
+  .tag.recycled { color:var(--sub); border-color:var(--line); background:#f4f4f5; }
+  .cascader { position:relative; }
+  .panels { display:flex; gap:0; border:1px solid var(--line); border-radius:4px; background:#fff; margin-top:4px; }
+  .panel { width:170px; max-height:190px; overflow:auto; border-right:1px solid var(--line); }
+  .panel:last-child { border-right:none; }
+  .panel div { padding:5px 10px; cursor:pointer; white-space:nowrap; }
+  .panel div:hover { background:var(--bg); }
+  .panel div.sel { color:var(--blue); font-weight:600; }
+  .slots { display:flex; gap:12px; flex-wrap:wrap; }
+  .slot { border:1px dashed var(--line); border-radius:6px; padding:10px; min-width:230px; background:#fcfcfd; }
+  .slot h4 { margin:0 0 6px; font-size:13px; color:var(--sub); font-weight:600; }
+  .slot .file { font-size:12px; color:var(--sub); margin-top:4px; word-break:break-all; }
+  .err { color:var(--red); font-size:13px; margin:6px 0; min-height:20px; }
+  .hint { color:var(--sub); font-size:12px; }
+  dialog { border:1px solid var(--line); border-radius:6px; padding:18px; min-width:340px; }
+  dialog .btns { display:flex; gap:10px; justify-content:flex-end; margin-top:14px; }
+  pre#snapshot { background:#1e222b; color:#c8d3f0; padding:12px; border-radius:6px; max-height:340px; overflow:auto; font-size:12px; }
+  .kv { color:var(--sub); font-size:12px; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<header>
+  <b>商品上架练习沙盒</b>
+  <span class="warn">练习用，不是任何真实店铺</span>
+  <span class="hint">数据只存在本机浏览器 localStorage，页面不发任何网络请求</span>
+  <nav id="nav"></nav>
+  <button id="reset">重置为种子数据</button>
+</header>
+<main id="view"></main>
+<dialog id="confirm"><p id="confirm-text"></p>
+  <div class="btns"><button class="ghost" id="confirm-no">取消</button><button class="act" id="confirm-yes">确定</button></div>
+</dialog>
+<script>
+"use strict";
+// 一个刻意做得像真实后台的练习页：必填标记不完整、类目存在同名节点、规格行有隐藏必填项。
+// 埋的坑全部列在 sandbox/README.md，对照实验要求可复现，不靠隐藏关卡。
+var STORE_KEY = "alp-sandbox-v1";
+var SEP = " / ";
+var TREE = {
+  "食品/零食": { "薯片": null, "辣条": null, "食品": null },
+  "方便速食": { "泡面": null, "八宝粥": null, "速食食品": null },
+  "酒水饮料": { "茶饮料": { "乌龙茶": null, "绿茶": null }, "汽水": null, "饮用水": null },
+  "日用百货": { "清洁": null }
+};
+
+// 种子刻意做出几种真实差异形状，让校验与对账有东西可抓：
+// 一条只有整箱行（缺单件）、一条价格与常见队列不同、一条待审核、一条在回收站。
+function spec(name, price, points, weight, stock) {
+  return { name: name, price: price, stock: stock === undefined ? 10000 : stock, points: points,
+           weight: weight, listed: true, image: null };
+}
+
+function seed() {
+  return [
+    row("SPU202601021015001111", "农夫山泉天然水550ml", "酒水饮料" + SEP + "饮用水", "on-sale",
+        [spec("550ml*1瓶", 2, 1.1, 570), spec("24瓶*箱", 48, 26.4, 13600)]),
+    row("SPU202601021016002222", "康师傅红烧牛肉面", "方便速食" + SEP + "泡面", "on-sale",
+        [spec("105g*1袋", 4.5, 1.5, 110)]),
+    row("SPU202601021017003333", "乐事薯片原味70g", "食品/零食" + SEP + "薯片", "on-sale",
+        [spec("12袋*箱", 78, 30, 900)]),
+    row("SPU202601030930004444", "银鹭八宝粥360g", "方便速食" + SEP + "八宝粥", "pending-review",
+        [spec("360g*1罐", 5, 1.6, 400), spec("12罐*箱", 54, 19.2, 4900)]),
+    row("SPU202601030945005555", "老枞单丛茶叶500g", "酒水饮料" + SEP + "茶饮料" + SEP + "乌龙茶", "pending-review",
+        [spec("500g*1盒", 238, 128, 612)]),
+    row("SPU202601010800006666", "乐事薯片黄瓜味70g", "食品/零食" + SEP + "薯片", "recycled",
+        [spec("70g*1袋", 6, 2, 90)])
+  ];
+  function row(id, name, category, status, specs) {
+    return { id: id, name: name, category: category, scope: "全域自提点", code: "", barcode: "",
+             specName: "规格", specs: specs,
+             images: { main: { name: id + "-main.png", bytes: 168320 }, detail: [] },
+             status: status, createdAt: isoFromId(id) };
+  }
+}
+
+function isoFromId(id) {
+  var d = String(id).replace(/^SPU/, "").slice(0, 14);
+  if (d.length !== 14) { return "2026-01-01 00:00"; }
+  return d.slice(0,4) + "-" + d.slice(4,6) + "-" + d.slice(6,8) + " " + d.slice(8,10) + ":" + d.slice(10,12);
+}
+
+function load() {
+  var raw = null;
+  try { raw = localStorage.getItem(STORE_KEY); } catch (e) { raw = null; }
+  if (raw) { try { return JSON.parse(raw); } catch (e) { /* 落盘坏了就回到种子 */ } }
+  var fresh = { items: seed(), seq: 7 };
+  save(fresh);
+  return fresh;
+}
+function save(state) {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* 隐私模式下只在内存里跑 */ }
+}
+
+var state = load();
+
+// ---------- 快照：与 listings.example.json 同形状 ----------
+function snapshot(board) {
+  var rows = state.items.filter(function (it) { return it.status !== "recycled"; });
+  return {
+    board: board || "pickup",
+    capturedAt: new Date().toISOString(),
+    source: location.href.split("#")[0] + "#/list",
+    total: rows.length,
+    items: rows.map(function (it) {
+      return { id: it.id, name: it.name, status: it.status,
+               specs: it.specs.map(function (s) {
+                 return { name: s.name, price: s.price, points: s.points, stock: s.stock, weight: s.weight, listed: s.listed };
+               }) };
+    })
+  };
+}
+window.__alpSnapshot = snapshot;
+
+// ---------- 路由 ----------
+var ROUTES = [["#/new", "新建商品"], ["#/list", "商品列表"], ["#/recycle", "回收站"]];
+function renderNav() {
+  var here = location.hash || "#/new";
+  document.getElementById("nav").innerHTML = ROUTES.map(function (r) {
+    return '<a href="' + r[0] + '" class="' + (r[0] === here ? "on" : "") + '">' + r[1] + "</a>";
+  }).join("");
+}
+function route() {
+  var here = location.hash || "#/new";
+  renderNav();
+  if (here === "#/list") { renderList(); }
+  else if (here === "#/recycle") { renderRecycle(); }
+  else { renderForm(); }
+}
+window.addEventListener("hashchange", route);
+
+function el(tag, attrs, kids) {
+  var node = document.createElement(tag);
+  Object.keys(attrs || {}).forEach(function (k) {
+    if (k === "text") { node.textContent = attrs[k]; }
+    else if (k === "html") { node.innerHTML = attrs[k]; }
+    else { node.setAttribute(k, attrs[k]); }
+  });
+  (kids || []).forEach(function (c) { if (c) { node.appendChild(c); } });
+  return node;
+}
+
+// ---------- 新建表单 ----------
+function renderForm() {
+  var view = document.getElementById("view");
+  view.innerHTML = "";
+  var errors = [];
+
+  var basic = el("div", { "class": "card" }, [el("h2", { text: "基本信息" })]);
+  var name = el("input", { id: "f-name", placeholder: "请输入商品名称", maxlength: "42" });
+  var scope = el("select", { id: "f-scope" }, [
+    el("option", { value: "全域自提点", text: "全域自提点" }),
+    el("option", { value: "指定自提点", text: "指定自提点" }),
+    el("option", { value: "全部门店", text: "全部门店" })
+  ]);
+  var code = el("input", { id: "f-code", placeholder: "商家编码（可留空）" });
+  var barcode = el("input", { id: "f-barcode", placeholder: "条码（可留空）" });
+  basic.appendChild(field("商品名称", name, true));
+  basic.appendChild(cascaderCard());
+  basic.appendChild(el("div", { "class": "row" }, [field("上架范围", scope, true),
+                                                  field("商家编码", code), field("条码", barcode)]));
+  basic.appendChild(el("div", { "class": "hint", text: "提示：标了 * 的字段会被检查；没标 * 的字段也可能拦住提交。" }));
+
+  var specCard = el("div", { "class": "card" }, [el("h2", { text: "规格与 SKU" })]);
+  var specName = el("input", { id: "f-specname", placeholder: "规格名，如 规格", value: "规格" });
+  specCard.appendChild(el("div", { "class": "row" }, [field("规格名", specName)]));
+  var valuesWrap = el("div", { id: "spec-values" });
+  specCard.appendChild(valuesWrap);
+  var addValue = el("button", { "class": "ghost", text: "+ 增加规格值", type: "button" });
+  specCard.appendChild(addValue);
+  var tableWrap = el("div", { id: "sku-wrap" });
+  specCard.appendChild(tableWrap);
+  specCard.appendChild(el("div", { "class": "hint",
+    text: "重量为空的行会被拦下：这一列不标必填，但提交必须填。" }));
+
+  var imageCard = el("div", { "class": "card" }, [el("h2", { text: "商品图片" })]);
+  var slots = el("div", { "class": "slots" });
+  slots.appendChild(slot("主图（需 1:1 方图，最多 1 张）", "f-main", false));
+  slots.appendChild(slot("详情图（不限比例，可多张）", "f-detail", true));
+  imageCard.appendChild(slots);
+  imageCard.appendChild(el("div", { "class": "hint", text: "上传后回显文件名与字节数：白图通常只有几 KB，对账与校验都靠这个数。" }));
+
+  var submitRow = el("div", { "class": "card" });
+  var errBox = el("div", { "class": "err", id: "form-error" });
+  var submit = el("button", { "class": "act", id: "f-submit", text: "提交审核", type: "button" });
+  submitRow.appendChild(errBox);
+  submitRow.appendChild(submit);
+
+  view.appendChild(basic); view.appendChild(specCard); view.appendChild(imageCard); view.appendChild(submitRow);
+
+  var specValues = [];
+  function redrawValues() {
+    valuesWrap.innerHTML = "";
+    var row = el("div", { "class": "row" });
+    specValues.forEach(function (v, i) {
+      var input = el("input", { value: v, "data-idx": String(i), placeholder: "规格值，如 500ml*1瓶" });
+      input.addEventListener("input", function () { specValues[i] = input.value.trim(); redrawSkuTable(); });
+      row.appendChild(field(i === 0 ? "规格值（单件在前）" : "规格值 " + (i + 1), input));
+    });
+    valuesWrap.appendChild(row);
+    redrawSkuTable();
+  }
+  function redrawSkuTable() {
+    tableWrap.innerHTML = "";
+    var rows = specValues.map(function (v, i) {
+      return el("tr", {}, [
+        el("td", { text: v || "(未填)" }),
+        el("td", {}, [numInput("price", i, "")]),
+        el("td", {}, [numInput("stock", i, "10000")]),
+        el("td", {}, [numInput("points", i, "")]),
+        el("td", {}, [numInput("weight", i, "")]),
+        el("td", {}, [el("input", { type: "checkbox", checked: "", "data-field": "listed", "data-idx": String(i) })]),
+        el("td", {}, [fileCell("f-sku-" + i)])
+      ]);
+    });
+    if (!rows.length) { rows = [el("tr", {}, [el("td", { text: "先加一个规格值", colspan: "7" })])]; }
+    tableWrap.appendChild(el("table", {}, [
+      el("tr", {}, [h("规格值"), h("价格"), h("库存"), h("积分"), h("重量(g)"), h("是否上架"), h("规格图")])
+    ].concat(rows)));
+  }
+  function fileCell(key) {
+    files[key] = files[key] || [];
+    var input = el("input", { type: "file", id: key, accept: "image/*", "data-slot": key });
+    var info = el("span", { text: "" });
+    input.addEventListener("change", function () {
+      var chosen = Array.prototype.slice.call(input.files || []);
+      files[key] = chosen.map(function (f) { return { name: f.name, bytes: f.size }; });
+      info.textContent = chosen.length ? chosen[0].name + " (" + chosen[0].size + " bytes)" : "";
+    });
+    return el("div", {}, [input, info]);
+  }
+  function numInput(kind, idx, preset) {
+    var input = el("input", { type: "number", step: "0.01", "data-field": kind, "data-idx": String(idx) });
+    // stock arrives pre-filled, like a real back office: the fill loop asserts defaults, it does not type them
+    if (preset) { input.value = preset; }
+    return input;
+  }
+  function h(text) { return el("th", { text: text }); }
+
+  addValue.addEventListener("click", function () {
+    specValues.push(specValues.length ? "15瓶*箱" : "500ml*1瓶");
+    redrawValues();
+  });
+  specValues.push("500ml*1瓶");
+  redrawValues();
+
+  submit.addEventListener("click", function () {
+    errors = collect();
+    var box = document.getElementById("form-error");
+    if (errors.length) {
+      box.textContent = "提交失败：" + errors.join("；");
+      return;
+    }
+    box.textContent = "";
+    askConfirm("确认提交审核？提交后进入待审核，审核通过前不会上架。", function () {
+      commit(collected());
+    });
+  });
+
+  function collect() {
+    var problems = [];
+    var n = name.value.trim();
+    if (!n) { problems.push("商品名称不能为空"); mark(name, true); } else { mark(name, false); }
+    if (!cascaderValue) { problems.push("商品类目未选择"); }
+    var values = specValues.filter(Boolean);
+    if (!values.length) { problems.push("至少需要一个规格值"); }
+    tableWrap.querySelectorAll("tr").forEach(function (tr, i) {
+      if (i === 0 || !values[i - 1]) { return; }
+      var fields = {};
+      tr.querySelectorAll("input").forEach(function (input) { fields[input.getAttribute("data-field")] = input; });
+      if (fields.price.value === "" || fields.points.value === "" || fields.stock.value === "") {
+        problems.push("规格「" + values[i - 1] + "」的价格/库存/积分没填全");
+      }
+      if (fields.weight.value === "") { problems.push("规格「" + values[i - 1] + "」的重量为空"); }
+    });
+    var main = files["f-main"][0];
+    if (!main) { problems.push("主图未上传"); }
+    return problems;
+  }
+
+  function collected() {
+    var rows = [];
+    var valueList = specValues.filter(Boolean);
+    valueList.forEach(function (v, i) {
+      var tr = tableWrap.querySelectorAll("tr")[i + 1];
+      var f = {};
+      tr.querySelectorAll("input").forEach(function (input) { f[input.getAttribute("data-field")] = input.value; });
+      rows.push({ name: v, price: Number(f.price), stock: Number(f.stock), points: Number(f.points),
+                  weight: Number(f.weight), listed: tr.querySelector('[data-field="listed"]').checked,
+                  image: files["f-sku-" + i][0] || null });
+    });
+    var created = { id: "SPU" + stamp() + String(state.seq).padStart(4, "0"), name: name.value.trim(),
+                    category: cascaderValue, scope: scope.value, code: code.value.trim(),
+                    barcode: barcode.value.trim(), specName: specName.value.trim(), specs: rows,
+                    images: { main: files["f-main"][0] || null,
+                              detail: files["f-detail"].slice() },
+                    status: "pending-review", createdAt: nowIso() };
+    state.seq += 1;
+    return created;
+  }
+}
+
+function mark(input, bad) { input.className = bad ? "bad" : ""; }
+function stamp() {
+  var d = new Date(), p = function (v) { return String(v).padStart(2, "0"); };
+  // SPU + 14-digit creation time + a 4-digit sequence, the shape a real platform uses:
+  // the audit reads the built time straight out of the id
+  return "" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+function nowIso() {
+  var d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")
+    + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+function field(label, control, required) {
+  var lab = el("label", { text: label });
+  if (required) { lab.className = "req"; }
+  return el("div", { "class": "field" }, [lab, control]);
+}
+
+var files = {};
+function slot(title, key, multiple) {
+  files[key] = files[key] || [];
+  var input = el("input", { type: "file", id: key, accept: "image/*" });
+  if (multiple) { input.setAttribute("multiple", ""); }
+  var info = el("div", { "class": "file", text: "尚未上传" });
+  input.addEventListener("change", function () {
+    var chosen = Array.prototype.slice.call(input.files || []);
+    files[key] = chosen.map(function (f) { return { name: f.name, bytes: f.size }; });
+    info.textContent = chosen.length
+      ? chosen.map(function (f) { return f.name + " (" + f.size + " bytes)"; }).join("，")
+      : "尚未上传";
+  });
+  return el("div", { "class": "slot" }, [el("h4", { text: title }), input, info]);
+}
+
+// ---------- 级联类目（逐面板，含同名节点） ----------
+var cascaderValue = "";
+var cascaderPath = [null, null, null];
+function cascaderCard() {
+  var wrap = el("div", { "class": "field cascader" });
+  var input = el("input", { id: "f-category", placeholder: "请选择商品类目", readonly: "", value: cascaderValue });
+  var panels = el("div", { "class": "panels", id: "cat-panels" });
+  wrap.appendChild(el("label", { "class": "req", text: "商品类目" }));
+  wrap.appendChild(input);
+  wrap.appendChild(panels);
+  panels.style.display = "none";
+  // panels are built when the field opens: at construction time the node is not in the document yet
+  input.addEventListener("click", function () {
+    var open = panels.style.display === "flex";
+    panels.style.display = open ? "none" : "flex";
+    if (!open) { buildPanels(cascaderPath); }
+  });
+  return wrap;
+}
+
+function panelNodes(path, level) {
+  if (level === 0) { return Object.keys(TREE); }
+  var node = TREE;
+  for (var i = 0; i < level; i++) {
+    if (!node) { return []; }
+    node = node[path[i]];
+  }
+  return node ? Object.keys(node) : [];
+}
+
+function buildPanels(path) {
+  var panels = document.getElementById("cat-panels");
+  if (!panels) { return; }
+  panels.innerHTML = "";
+  for (let level = 0; level < 3; level++) {
+    // let, not var: with var every panel's click handler would close over the loop's final level
+    var names = panelNodes(path, level);
+    var panel = el("div", { "class": "panel" });
+    if (!names.length) { panel.appendChild(el("div", { text: "—", "class": "hint" })); }
+    names.forEach(function (label) {
+      var node = el("div", { text: label, "class": label === path[level] ? "sel" : "" });
+      node.addEventListener("click", function () {
+        var next = path.slice(0, level).concat([label]);
+        cascaderPath = next;
+        buildPanels(next);
+        var leaf = panelNodes(next, level + 1).length === 0;
+        if (leaf) {
+          cascaderValue = next.filter(Boolean).join(SEP);
+          var input = document.getElementById("f-category");
+          if (input) { input.value = cascaderValue; }
+          panels.style.display = "none";
+        }
+      });
+      panel.appendChild(node);
+    });
+    panels.appendChild(panel);
+  }
+}
+
+// ---------- 确认框 ----------
+function askConfirm(text, onYes) {
+  var dlg = document.getElementById("confirm");
+  document.getElementById("confirm-text").textContent = text;
+  dlg.showModal();
+  var yes = document.getElementById("confirm-yes"), no = document.getElementById("confirm-no");
+  function close() { dlg.close(); yes.onclick = null; no.onclick = null; }
+  yes.onclick = function () { close(); onYes(); };
+  no.onclick = function () { close(); };
+}
+
+function commit(created) {
+  state.items.unshift(created);
+  save(state);
+  location.hash = "#/list";
+}
+
+// ---------- 列表 ----------
+function renderList() {
+  var view = document.getElementById("view");
+  view.innerHTML = "";
+  var rows = state.items.filter(function (it) { return it.status !== "recycled"; });
+  var table = el("table", {}, [el("tr", {}, [
+    th("商品名称"), th("类目"), th("规格行"), th("最低价"), th("状态"), th("建品时间"), th("操作")])]);
+  rows.forEach(function (it) {
+    var lowest = Math.min.apply(null, it.specs.map(function (s) { return Number(s.price) || 0; }));
+    table.appendChild(el("tr", {}, [
+      el("td", { text: it.name }),
+      el("td", { text: it.category }),
+      el("td", { text: it.specs.map(function (s) { return s.name; }).join(" ｜ ") }),
+      el("td", { text: String(lowest) }),
+      el("td", {}, [el("span", { "class": "tag " + it.status, text: statusText(it.status) })]),
+      el("td", { text: it.createdAt }),
+      el("td", {}, [el("button", { "class": "ghost", text: "删除",
+        onclick: function () { askConfirm("把「" + it.name + "」放进回收站？审核过的商品只能删除重上。",
+          function () { it.status = "recycled"; save(state); renderList(); }); } })])
+    ]));
+  });
+  var card = el("div", { "class": "card" }, [
+    el("h2", { text: "商品列表（到店自提）" }),
+    el("div", { "class": "kv", text: "共 " + rows.length + " 条 · 状态筛选：全部（默认不带筛选，抓快照前先确认这里写着「全部」）" }),
+    table
+  ]);
+  var snap = el("pre", { id: "snapshot", text: JSON.stringify(snapshot(), null, 1) });
+  view.appendChild(card);
+  view.appendChild(el("div", { "class": "card" }, [
+    el("h2", { text: "列表快照（与 listings.example.json 同形状，可直接存成 listings.json）" }), snap]));
+}
+
+function renderRecycle() {
+  var view = document.getElementById("view");
+  view.innerHTML = "";
+  var rows = state.items.filter(function (it) { return it.status === "recycled"; });
+  var table = el("table", {}, [el("tr", {}, [th("商品名称"), th("类目"), th("状态"), th("操作")])]);
+  rows.forEach(function (it) {
+    table.appendChild(el("tr", {}, [el("td", { text: it.name }), el("td", { text: it.category }),
+      el("td", {}, [el("span", { "class": "tag recycled", text: "回收站" })]),
+      el("td", {}, [el("button", { "class": "ghost", text: "恢复",
+        onclick: function () { askConfirm("把「" + it.name + "」放回列表？",
+          function () { it.status = "pending-review"; save(state); renderRecycle(); }); } })])]));
+  });
+  if (!rows.length) { table.appendChild(el("tr", {}, [el("td", { text: "回收站是空的", colspan: "4" })])); }
+  view.appendChild(el("div", { "class": "card" }, [el("h2", { text: "回收站" }), table]));
+}
+
+function statusText(status) {
+  return { "on-sale": "销售中", "pending-review": "待审核", "recycled": "回收站" }[status] || status;
+}
+function th(text) { return el("th", { text: text }); }
+
+document.getElementById("reset").addEventListener("click", function () {
+  askConfirm("清空本地练习数据并回到种子状态？", function () {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) { /* 忽略 */ }
+    cascaderValue = "";
+    cascaderPath = [null, null, null];
+    state = load();
+    route();
+  });
+});
+
+route();
+</script>
+</body>
+</html>

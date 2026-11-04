@@ -80,6 +80,9 @@ jobs:
       - name: Smoke test the scripts end to end
         run: python tests/smoke.py
 
+      - name: Sandbox static checks
+        run: python tests/sandbox_static.py
+
       - name: Evals parse
         run: |
           python - <<'PY'
@@ -94,7 +97,7 @@ jobs:
 
       - name: No TODOs left
         run: |
-          if grep -rn "TODO" --include="*.md" --include="*.py" --include="*.json" --include="*.sh" .; then
+          if grep -rn "TODO" --include="*.md" --include="*.py" --include="*.json" --include="*.sh" --include="*.html" .; then
             echo "remove TODOs before merging"; exit 1
           fi
           echo "no TODOs"
@@ -105,7 +108,7 @@ jobs:
           import glob, sys
           bad = 0
           for path in glob.glob("**/*", recursive=True):
-              if path.startswith(".git/") or not path.endswith((".md", ".py", ".json", ".sh", ".yml", ".yaml")):
+              if path.startswith(".git/") or not path.endswith((".md", ".py", ".json", ".sh", ".yml", ".yaml", ".html")):
                   continue
               raw = open(path, "rb").read()
               try:

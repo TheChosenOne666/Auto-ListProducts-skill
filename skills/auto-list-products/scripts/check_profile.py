@@ -20,10 +20,12 @@ import sys
 REQUIRED = [
     "platform",
     "form.newUrl",
-    "image.uploadTrigger",
+    "form.listUrl",
+    "image.trays",
     "fields.name.locator",
     "fields.category.kind",
     "fields.category.locator",
+    "fields.category.expectedSeparator",
     "fields.spec.nameLocator",
     "fields.spec.valueLocator",
     "fields.spec.skuInputsLocator",
@@ -32,28 +34,77 @@ REQUIRED = [
     "business.mode",
 ]
 LOCATOR_PATHS = [
-    "image.uploadTrigger",
-    "image.cropConfirm",
-    "image.thumbLocator",
     "fields.name.locator",
     "fields.category.locator",
+    "fields.category.panelLocator",
+    "fields.scope.locator",
     "fields.spec.nameLocator",
     "fields.spec.valueLocator",
+    "fields.spec.addValueButton",
     "fields.spec.skuInputsLocator",
     "fields.submit.button",
     "fields.submit.confirmButton",
 ]
+TRAY_LOCATORS = ["uploadTrigger", "thumbLocator", "removeLocator"]
+TRAY_CROPS = {"square", "any", "none"}
+TRAY_BINDS = {"product", "sku"}
 MODES = {"fill-only", "fill-and-submit"}
 POINTS_MODES = {"none", "coupon", "fixed"}
 
 
-def get(doc, path):
+def get(doc, path, default=None):
     cur = doc
     for part in path.split("."):
         if not isinstance(cur, dict) or part not in cur:
-            return None
+            return default
         cur = cur[part]
-    return cur
+    return default if cur is None else cur
+
+
+def check_locator(doc, path, errors):
+    loc = get(doc, path)
+    if loc is None:
+        return
+    if not isinstance(loc, dict) or not loc.get("by") or not loc.get("value"):
+        errors.append(f"bad locator: {path} (want {{'by': ..., 'value': ...}})")
+
+
+def check_trays(doc, errors, warnings):
+    trays = get(doc, "image.trays")
+    if not isinstance(trays, list) or not trays:
+        errors.append("image.trays must be a non-empty list (one entry per upload slot on the form)")
+        return []
+    for i, tray in enumerate(trays):
+        tag = f"image.trays[{i}]"
+        if not isinstance(tray, dict):
+            errors.append(f"{tag}: want an object")
+            continue
+        key = tray.get("key") or f"{tag} (missing key)"
+        for field in TRAY_LOCATORS:
+            loc = tray.get(field)
+            if not isinstance(loc, dict) or not loc.get("by") or not loc.get("value"):
+                errors.append(f"{key}: {field} must be {{'by': ..., 'value': ...}}")
+        if not tray.get("label"):
+            errors.append(f"{key}: label missing - the fill loop finds this tile by its visible text")
+        crop = tray.get("crop", "square")
+        if crop not in TRAY_CROPS:
+            errors.append(f"{key}: crop must be one of {sorted(TRAY_CROPS)}, got {crop!r}")
+        if crop == "square" and not tray.get("cropConfirm"):
+            errors.append(f"{key}: crop=square needs cropConfirm (the button that commits the crop dialog)")
+        bind = tray.get("bind", "product")
+        if bind not in TRAY_BINDS:
+            errors.append(f"{key}: bind must be one of {sorted(TRAY_BINDS)}, got {bind!r}")
+        if not isinstance(tray.get("maxCount", 1), int) or int(tray.get("maxCount", 1)) < 1:
+            errors.append(f"{key}: maxCount must be an integer >= 1")
+    keys = [t.get("key") for t in trays if isinstance(t, dict)]
+    dupes = {k for k in keys if keys.count(k) > 1}
+    if dupes:
+        errors.append(f"duplicate tray keys: {sorted(dupes)}")
+    if "product" not in [t.get("bind", "product") for t in trays if isinstance(t, dict)]:
+        errors.append("no tray is bound to the product - which slot receives the product image?")
+    if not any(t.get("bind") == "sku" for t in trays if isinstance(t, dict)):
+        warnings.append("no bind=sku tray: per-variant images will be skipped if the form has them")
+    return trays
 
 
 def main() -> int:
@@ -76,11 +127,9 @@ def main() -> int:
             errors.append(f"missing: {path}")
 
     for path in LOCATOR_PATHS:
-        loc = get(doc, path)
-        if loc is None:
-            continue
-        if not isinstance(loc, dict) or not loc.get("by") or not loc.get("value"):
-            errors.append(f"bad locator: {path} (want {{'by': ..., 'value': ...}})")
+        check_locator(doc, path, errors)
+
+    trays = check_trays(doc, errors, warnings)
 
     mode = get(doc, "business.mode")
     if mode and mode not in MODES:
@@ -89,24 +138,65 @@ def main() -> int:
     points = get(doc, "business.pointsMode") or "none"
     if points not in POINTS_MODES:
         errors.append(f"business.pointsMode must be one of {sorted(POINTS_MODES)}, got {points!r}")
+    if points != "none" and get(doc, "fields.optional.points") is None:
+        errors.append("business.pointsMode is points but fields.optional.points has no locator")
 
-    if not get(doc, "image.minBytes"):
+    if get(doc, "business.caseSku", True):
+        label = get(doc, "fields.spec.caseSkuLabel")
+        if not label:
+            errors.append("business.caseSku is on but fields.spec.caseSkuLabel is missing")
+        elif "{" not in label:
+            warnings.append(f"caseSkuLabel {label!r} has no {{per}}/{{unit}}/{{cu}} placeholder; every case row will read the same")
+    else:
+        warnings.append("business.caseSku is off: queue emits single-unit rows only")
+
+    order = get(doc, "fields.spec.skuFieldOrder")
+    if not isinstance(order, list) or not order:
+        errors.append("fields.spec.skuFieldOrder must list the numeric inputs of a SKU row, in page order")
+    elif "price" not in order:
+        errors.append("fields.spec.skuFieldOrder must contain 'price'")
+
+    stock = get(doc, "defaults.stock")
+    if stock in (None, ""):
+        warnings.append("defaults.stock not set - every queue item must carry its own stock")
+    elif not isinstance(stock, (int, float)) or stock <= 0:
+        errors.append(f"defaults.stock must be a positive number, got {stock!r}")
+
+    min_bytes = get(doc, "image.minBytes")
+    if not min_bytes:
         warnings.append("image.minBytes missing, default 50000 will be used")
+    elif not isinstance(min_bytes, int) or min_bytes < 1024:
+        errors.append(f"image.minBytes must be an integer of bytes, got {min_bytes!r}")
+
     if not get(doc, "fields.submit.successWhen"):
         warnings.append("fields.submit.successWhen missing, default 'route-changed' will be used")
     if not get(doc, "probedAt"):
         warnings.append("probedAt missing - profile provenance unknown")
+    if get(doc, "fields.scope") is None:
+        warnings.append("no fields.scope: the form has no region/scope picker, or the probe missed it")
 
     if not args.quiet:
         print("profile summary")
         print(f"  platform      : {get(doc, 'platform')}")
         print(f"  new form      : {get(doc, 'form.newUrl')}")
+        print(f"  product list  : {get(doc, 'form.listUrl')}")
         print(f"  root category : {get(doc, 'defaults.rootCategory')}")
         print(f"  spec name     : {get(doc, 'defaults.specName') or '-'}")
+        print(f"  stock         : {stock if stock not in (None, '') else '-'}")
         print(f"  scope         : {get(doc, 'fields.scope.value') or '-'}")
-        print(f"  submit        : {get(doc, 'fields.submit.button.value') if isinstance(get(doc, 'fields.submit.button'), dict) else '-'}")
+        print(f"  sku row order : {order}")
+        submit = get(doc, "fields.submit.button")
+        print(f"  submit        : {submit.get('value') if isinstance(submit, dict) else '-'}")
         print(f"  mode          : {mode}")
         print(f"  points        : {points}   minCoupon: {get(doc, 'business.minCoupon') or 0}   counters: {get(doc, 'business.counters')}")
+        if trays:
+            print("  upload trays  :")
+            for tray in trays:
+                if not isinstance(tray, dict):
+                    continue
+                print(f"    - {tray.get('key')}: {tray.get('label') or '-'}"
+                      f"  bind={tray.get('bind', 'product')} crop={tray.get('crop', 'square')}"
+                      f" max={tray.get('maxCount', 1)}{' (optional)' if tray.get('optional') else ''}")
         notes = get(doc, "notes") or []
         if notes:
             print("  notes:")

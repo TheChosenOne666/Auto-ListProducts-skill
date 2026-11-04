@@ -8,11 +8,43 @@
     "loginUrlPattern": "<substring that means 'logged out'>"
   },
   "image": {
-    "uploadTrigger": {"by": "role+name", "value": "<upload button label>"},
-    "cropConfirm": {"by": "role+name", "value": "<crop confirm label>"},
-    "thumbLocator": {"by": "css", "value": "<css that matches stored thumbnails>"},
-    "removeLocator": {"by": "css", "value": "<css for the delete icon on a thumbnail>"},
-    "minBytes": 50000
+    "minBytes": 50000,
+    "trays": [
+      {
+        "key": "main",
+        "label": "<商品图 upload tile label, e.g. 商品图>",
+        "bind": "product",
+        "crop": "square",
+        "maxCount": 1,
+        "uploadTrigger": {"by": "role+name", "value": "<upload button label>"},
+        "cropConfirm": {"by": "role+name", "value": "<crop confirm label, e.g. 裁剪并上传>"},
+        "thumbLocator": {"by": "css", "value": "<css that matches stored thumbnails>"},
+        "removeLocator": {"by": "css", "value": "<css for the delete icon on a thumbnail>"}
+      },
+      {
+        "key": "detail",
+        "label": "<详情图 upload tile label>",
+        "bind": "product",
+        "crop": "any",
+        "maxCount": 10,
+        "uploadTrigger": {"by": "role+name", "value": "<upload button label>"},
+        "cropConfirm": {"by": "role+name", "value": "<confirm label, or the 'no crop' ratio option>"},
+        "thumbLocator": {"by": "css", "value": "<css that matches stored thumbnails>"},
+        "removeLocator": {"by": "css", "value": "<css for the delete icon on a thumbnail>"}
+      },
+      {
+        "key": "sku",
+        "label": "<per-spec-row image cell, if the form has one>",
+        "bind": "sku",
+        "crop": "square",
+        "maxCount": 1,
+        "optional": true,
+        "uploadTrigger": {"by": "css", "value": "<css of the image cell in a SKU row>"},
+        "cropConfirm": {"by": "role+name", "value": "<crop confirm label, if this slot opens the crop dialog>"},
+        "thumbLocator": {"by": "css", "value": "<css that matches a SKU row thumbnail>"},
+        "removeLocator": {"by": "css", "value": "<css for the delete icon in a SKU row>"}
+      }
+    ]
   },
   "fields": {
     "name": {"locator": {"by": "placeholder", "value": "<name input placeholder>"}, "maxLength": 42},
@@ -26,6 +58,7 @@
     "scope": {
       "kind": "select",
       "locator": {"by": "css", "value": "<css of the scope select>"},
+      "optional": true,
       "options": ["<option A>", "<option B>"],
       "value": "<option the user wants as default>"
     },
@@ -35,7 +68,7 @@
       "addValueButton": {"by": "role+name", "value": "<add value button label>"},
       "skuInputsLocator": {"by": "css", "value": "<css for numeric SKU inputs>"},
       "skuFieldOrder": ["price", "stock", "points"],
-      "caseSkuLabel": "<how the case row is labelled, e.g. '{per}{unit}*箱'>"
+      "caseSkuLabel": "<how the case row is labelled, template over {per} {unit} {cu}, e.g. '{per}{unit}*{cu}' or '{per}{unit}*箱'>"
     },
     "optional": {
       "points": {"locator": {"by": "placeholder", "value": "<points input>"}, "decimals": 1},

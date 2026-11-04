@@ -12,11 +12,11 @@
 | 阶段 | 产出 | 工具 |
 |---|---|---|
 | 环境自检 | 确认浏览器通道、真实输入能力、依赖、登录态、提交模式 | 无（agent 按 `SKILL.md` 执行） |
-| 探测 | `profile.json`：字段定位符、类目树、默认值、校验点、业务规则 | `check_profile.py` |
-| 收图 | 1280×1280 方图，白图与轮播圆点自动拦截/修正 | `crop_square.py` |
-| 体检 | 本地或线上图片的白图检测（字节数 + 颜色数） | `check_images.py` |
-| 建队列 | 可断点续跑的 `queue.json`（积分/显示数/跳过线均为可选） | `make_queue.py` |
-| 登记表 | 续填 Excel，供货价保持数字、不打断公式 | `fill_xlsx.py` |
+| 探测 | `profile.json`：字段定位符、上传槽（商品图/详情图/规格图）、类目树、默认值、校验点、业务规则 | `check_profile.py` |
+| 收图 | 方图；白图不落盘（自动改用备图重裁），轮播圆点自动裁掉并补白 | `crop_square.py` |
+| 体检 | 本地或线上图片的白图检测（字节数 + 颜色数，按内容不按扩展名） | `check_images.py` |
+| 建队列 | 可断点续跑的 `queue.json`，规则全部取自 profile，同名同价自动去重 | `make_queue.py` |
+| 登记表 | 续填 Excel：自动定位空行、供货价保持数字、不打断公式、继承上一行样式 | `fill_xlsx.py` |
 | 填写 | 上传→名称→类目→范围→规格→SKU→逐项校验→提交 | `references/browser-playbook.md` |
 
 ## 安装
@@ -51,6 +51,8 @@ skills/auto-list-products/
 ├── references/                    探测清单、浏览器手法、踩坑清单
 ├── scripts/                       五个可执行脚本（零 SDK 依赖）
 └── evals/evals.json               验收用例：带 skill / 不带 skill 对比
+tests/smoke.py                     端到端冒烟测试：造夹具→跑五个脚本→断言产物
+.github/workflows/check-skills.yml 结构自检 + 冒烟测试，Linux 与 Windows 各跑一遍
 ```
 
 ## 为什么是 skill，不是平台

@@ -50,6 +50,20 @@
       "prompt": "这批图里可能有一两个商品我发重复了，你自己判断别重复上架。",
       "expected_output": "Deduplicates by title plus variant before building the queue, lists what it dropped and why, distinguishes same-product-different-case-pack (keep both when the pack and price genuinely differ) from true duplicates, and after the batch rescans the product list to confirm each name appears exactly once.",
       "files": ["shots/"]
+    },
+    {
+      "id": 8,
+      "name": "second-platform",
+      "prompt": "换个后台上架，流程和上次一样，类目和规格跟以前那个平台完全不同。",
+      "expected_output": "Re-probes the new create form from scratch (fields, upload trays with their own crop behaviour, category tree, defaults, verification hooks) and writes a new profile.json instead of transplanting the old one. Builds the queue with make_queue.py --profile so the root category, path separator, case-row label word, stock, spec name and points policy all come from the profile rather than re-typed flags or remembered values. Validates the profile and runs one pilot product before batching.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "sheet-row-without-supply",
+      "prompt": "这几款只有售价和送券，供货价厂家还没给，登记表先续上，别把后面的公式弄坏。",
+      "expected_output": "Appends with fill_xlsx.py using rows that carry no supply price: name and retail written, the coupon as a literal value, the supply and unit-cost cells left empty rather than forced into a formula. Finds the first empty row itself instead of trusting max_row, inherits the previous row's border and clears leftover red font, backs the workbook up first, refuses while the Excel lock file exists, and warns that formula cells need a reopen or F9.",
+      "files": []
     }
   ]
 }

@@ -56,16 +56,23 @@ The probe answers four questions by inspecting the live create form:
 1. **Where is the form** and where is the list? (routes, not guesses)
 2. **Which fields exist and which are required**, with one stable locator each (label/placeholder/role
    text, not brittle CSS classes).
-3. **What is the category tree**, dumped level by level, and how the selected path reads back.
+3. **What is the category tree**, dumped level by level, and how the selected path reads back
+   (including the separator used in the read-back string).
 4. **How is success proven** — where the stored image URL appears, which preview echoes the points, what
    the confirmation dialog says, and what the URL looks like when the submit really landed.
+
+Every upload slot on the form becomes one entry in `image.trays`: the product image, the detail images
+(their own tile, often with a different ratio rule), and a per-spec-row image cell when the form has one.
+For each, record `crop` (`square` opens a crop dialog that needs a confirm button, `any` accepts the file
+as-is, `none` means no dialog), `maxCount` and `bind` (`product` or `sku`).
 
 Then ask the user the business questions the page cannot answer:
 
 - which scope/region option to use by default,
 - stock quantity, spec name, and the root category for their products,
 - whether points exist and how they are derived, whether display counters should be filled,
-- whether a case SKU row is wanted,
+- whether a case SKU row is wanted, and how that row is labelled on their platform (a template such as
+  `{per}{unit}*{cu}` — the case-pack word is theirs, not this skill's),
 - any minimum coupon / skip rule (default: none),
 - fill-only or fill-and-submit.
 
@@ -78,51 +85,81 @@ python scripts/check_profile.py profile.json
 
 ## Phase 2 — Image intake
 
-Crop one square image per product with `scripts/crop_square.py`:
+Crop one square image per product with `scripts/crop_square.py`, mapping each source resolution to the
+photo area of the screenshot (`--windows "1440x3200:285,1280x2844:280:1500"`; phone screenshots carry a
+fixed title bar, and a bottom bound is white-padded back to a square):
 
-- per-resolution crop tops (phone screenshots carry a fixed title bar),
-- blank-crop detection (the photo never rendered in the screenshot),
+- blank-crop detection (the photo never rendered in the screenshot) — a blank crop is **never written to
+  disk**; the entry automatically falls back to its `alt_src` duplicate screenshot,
 - carousel-dot detection: dots at the bottom edge are capped off and white-padded back to square.
 
-Read the report; for every blank entry use a duplicate screenshot (`alt_src`) or ask the user to re-send
-it. Eyeball the contact sheet before uploading anything.
+Read the report; for every entry that is still blank or unusable, use another screenshot or ask the user to
+re-send it. Eyeball the contact sheet before uploading anything.
 
 ## Phase 3 — Fact extraction
 
-Record per product: title (without case pack), size + unit, units per case, retail price per unit, case
-supply price, image file, category key. Unreadable values are listed and asked, never guessed.
+Record per product: `n`, title (without case pack), `size` + `unit`, `per` units per case, `supply` case
+price, `retail` price per unit, `cat` key, `img` file; add `cu` (the case-pack word) when the profile's
+`caseSkuLabel` uses `{cu}`. Unreadable values are listed and asked, never guessed.
 
 Sanity-check arithmetic: a bundle is one unit (cost = single-pack cost × packs per bundle); a case's unit
 cost is case price ÷ units per case; a negative or absurd margin stops the batch.
 
-Write `products.json` (shape documented in `scripts/make_queue.py --help`).
+Write `products.json` (shape in `scripts/make_queue.py --help`).
 
 ## Phase 4 — Optional registration sheet
 
-Only if the user keeps one: append rows with `scripts/fill_xlsx.py`. Price columns stay numeric (case pack
-via `number_format`, never text), derived columns stay formulas, workbook backed up first.
+Only if the user keeps one: append rows with `scripts/fill_xlsx.py`. The first empty row is detected from
+the name column (`max_row` lies on sheets that end in styled blanks). Price columns stay numeric (case pack
+via `number_format`, never text), derived columns stay formulas, the workbook is flagged for recalc on open
+and backed up first. Rows with no supply price write a literal coupon and leave those two cells empty.
 
 ## Phase 5 — Queue
 
-`scripts/make_queue.py` turns facts into resumable jobs. All business behaviour comes from the profile:
+`scripts/make_queue.py --profile profile.json` builds the jobs. The profile is the only source of business
+behaviour, so nothing has to be re-typed per batch:
 
-- category path from `categories.json`, re-checked against the live tree at fill time;
-- one SKU row per unit, plus a case row only if the profile wants one;
-- points only if the profile defines them (`--points-as-coupon` or per-product values);
-- display counters only with `--display-counters`;
-- skip rule only with `--min-coupon`.
+- root category and the path separator come from `defaults.rootCategory` / `fields.category.expectedSeparator`,
+  and each item carries the exact `expectCat` string the fill step asserts against;
+- one SKU row per unit, plus a case row built from `fields.spec.caseSkuLabel` unless `business.caseSku` is off;
+- stock and spec name ride on every item from `defaults`, so the browser step reads one object and has all
+  of its numbers;
+- points follow `business.pointsMode` (`none` / `coupon` / `fixed`), display counters follow
+  `business.counters`, the coupon floor follows `business.minCoupon`;
+- same name + same retail is dropped as a duplicate; same name + different price is kept and reported;
+- a missing value, an unknown category key or an impossible coupon aborts the run without writing a queue.
+
+Flags (`--root`, `--points`, `--min-coupon`, `--display-counters`, `--no-case-sku`, `--stock`,
+`--spec-name`, `--only`) exist only to override the profile for a single run.
 
 ## Phase 6 — Fill loop
 
 Follow `references/browser-playbook.md`, driven by `profile.json`. Per product:
 
 1. open a fresh form from `form.newUrl`;
-2. upload product + detail images, then verify the stored object's byte size (a white crop is a few KB —
-   retry, then abort);
+2. fill each `image.trays` entry bound to the product — upload, commit the crop dialog when that tray is
+   `crop: square`, then verify the stored object's byte size against `image.minBytes` (a white crop is a few
+   KB — delete, retry, then abort); tray-bound-to-`sku` cells get one image per spec row;
 3. fill name → category → scope → spec name → spec values → SKU rows (optional fields only as configured);
 4. verify every field against the queue; any mismatch aborts the item;
 5. submit only in `fill-and-submit` mode, accept the confirmation, assert the route changed;
 6. persist progress after each success; stop the batch on the first abort and report it.
+
+`state.json` is the resume record, one entry per attempted item:
+
+```json
+{
+  "queueFile": "queue.json",
+  "profile": "profile.json",
+  "items": [
+    {"n": 1, "status": "submitted", "attempts": 1, "note": ""},
+    {"n": 2, "status": "aborted", "attempts": 2, "note": "category read back as the wrong leaf"}
+  ]
+}
+```
+
+An item is only ever `submitted` after its route assertion passed; resume by skipping those and re-running
+the rest.
 
 ## Phase 7 — Audit
 
@@ -138,11 +175,11 @@ Follow `references/browser-playbook.md`, driven by `profile.json`. Per product:
 
 ## Resources
 
-- `profile.example.json` — the profile the probe produces.
+- `profile.example.json` — the profile the probe produces (upload trays, locators, defaults, business policy).
 - `scripts/check_profile.py` — refuse a half-probed profile before touching products.
-- `scripts/crop_square.py` — square crops, blank + dot guards, contact sheet.
+- `scripts/crop_square.py` — square crops, blank + dot guards with `alt_src` fallback, contact sheet.
 - `scripts/check_images.py` — blank-image audit for local files or hosted URLs.
-- `scripts/make_queue.py` — facts → queue, with optional points / counters / skip rule.
+- `scripts/make_queue.py` — facts + profile → queue (root, case label, points, counters, floor, stock).
 - `scripts/fill_xlsx.py` — append rows without breaking formulas.
 - `references/probe-checklist.md` — the discovery procedure behind Phase 1.
 - `references/browser-playbook.md` — uploads, real input events, handoff, window hygiene.

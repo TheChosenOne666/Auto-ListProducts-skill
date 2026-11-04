@@ -9,7 +9,7 @@
     {
       "name": "auto-list-products",
       "description": "Bulk product listing skill: environment preflight, platform probe to profile.json, square crops with blank/dot guards, resumable queue, browser form filling with per-field verification before submit.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "source": "./",
       "skills": ["./skills/auto-list-products"],
       "author": {

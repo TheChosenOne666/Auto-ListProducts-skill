@@ -18,12 +18,61 @@ Fix: `crop_square.py` detects the gap-then-dots pattern, caps the crop above it 
 square. Verify on the contact sheet; do not simply zoom the platform cropper (fixed crop boxes often have
 no usable pan/zoom controls).
 
+## Blank crop saved next to the good ones
+
+Symptom: the crops folder looks complete, and one file is a white square.
+Cause: the crop step wrote the blank result anyway, so the batch uploaded it.
+Fix: `crop_square.py` writes only crops that clear the colour test; a blank entry either resolves through
+`alt_src` or exits 2 with the file left unwritten. `check_images.py` is the second net, on the stored bytes.
+
+## Extension lies about format
+
+Symptom: an audit reports "no images" or a decoder rejects a file named `.jpg`.
+Cause: backends and phones re-encode on save, so the name and the content disagree; a folder scanned with a
+`*.jpg` pattern silently skips the PNG crops.
+Fix: scan by content and by a list of extensions (`check_images.py --ext jpg,jpeg,png,webp`) and judge the
+fetched bytes, not the file name.
+
 ## Duplicate listings
 
 Symptom: the same product appears twice.
 Cause: repeated screenshots within a batch, or a deleted-and-relisted item whose delete did not commit.
-Fix: dedupe by title + spec before building the queue; after any delete-and-relist, rescan the product
-list and count occurrences per name (must be exactly one).
+Fix: dedupe by title + spec before building the queue (`make_queue.py` drops same name + same retail and
+reports it); after any delete-and-relist, rescan the product list and count occurrences per name (must be
+exactly one).
+
+## Same name, different price
+
+Symptom: the queue reports two products sharing a name but keeps both.
+Cause: that is often legitimate — the same item in different pack sizes or grades, and name-only matching
+hides it.
+Fix: keep both, confirm with the user, and reconcile inventories by name **plus** price and SKU structure.
+Matching on name alone makes an existing listing look like a duplicate and get skipped.
+
+## Submit button does nothing
+
+Symptom: the click lands, no confirmation dialog, no error text, the form just stays.
+Cause: a required field you never saw — often one that belongs to a different shipping/section mode, or an
+empty numeric column in the SKU table.
+Fix: read the form's own validation output (per-field error text, a red label, a scrolled-to section); if
+there is none, treat every field in the active section as a candidate and probe them one at a time. Record
+what it was in `profile.notes` so the next batch does not rediscover it.
+
+## Approved listing refuses to save
+
+Symptom: on an item that already passed review, edits are accepted by the dialog but the record is
+unchanged, and the URL never leaves the form.
+Cause: some backends freeze a reviewed product and only allow a new listing from scratch.
+Fix: back up the current field values and images, delete the listing, then create a fresh one. Expect the
+status to fall back to "pending review", and confirm the old row really disappeared before relisting so the
+batch does not end up with two copies.
+
+## Queue disagrees with the profile
+
+Symptom: the numbers filled into the form are not what the user agreed to; the flags were re-typed per batch.
+Cause: business rules were passed on the command line instead of read from the profile, so the two drifted.
+Fix: always build with `make_queue.py --profile profile.json`; flags exist to override one run, and the
+printed `profile:` line states which values were used.
 
 ## Coupon / margin nonsense
 

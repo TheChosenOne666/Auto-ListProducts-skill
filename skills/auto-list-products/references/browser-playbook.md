@@ -32,6 +32,10 @@ Selectors below are Element-Plus-style examples; the real names come from `profi
 
 ## Uploads: real clicks only
 
+Walk `image.trays` in profile order. A tray bound to the product is filled once per listing; a tray bound
+to `sku` is filled once per spec row (that is where per-variant photos go). `crop: any` trays take the file
+as-is and may not open a dialog at all; `crop: square` trays always need the confirm step.
+
 Synthetic clicks (dispatched through the debugger) are captured by the file-chooser interceptor, the
 native dialog never appears, and `setFiles` is refused. The working recipe:
 
@@ -45,11 +49,15 @@ native dialog never appears, and `setFiles` is refused. The working recipe:
    (`裁剪并上传`).
 
 After the upload completes, verify the stored object: read the thumbnail's `src` and fetch it.
-A white crop compresses to ~10 KB; anything under ~50 KB means the crop was blank — delete the thumbnail
-(`.remove-btn`) and retry, at most twice, then abort the item.
+A white crop compresses to ~10 KB; anything under `image.minBytes` (50 KB by default) means the crop was
+blank — delete the thumbnail (`removeLocator`) and retry, at most twice, then abort the item. Extensions lie
+about format: a file named `.jpg` can be a PNG, so judge the stored bytes, never the name.
 
 If no OS dialog ever appears, the chooser interceptor is stuck: reset the browser agent, recreate it, and
 re-claim (or reopen) the tab.
+
+Do not expect to fix a bad crop in the page: many crop dialogs expose a fixed box with no pan or zoom, and
+dragging it closes the dialog. Re-crop locally instead.
 
 ## Category cascader
 
@@ -70,9 +78,13 @@ re-claim (or reopen) the tab.
 
 ## Spec matrix and SKU rows
 
-- One spec name, several values: type the first value, click `+增加规格值`, type the next.
-- SKU rows appear in value order. Fill the numeric inputs by index (price, stock, points per row) and
-  read all of them back before submitting; do not use the bulk-fill widget when rows differ.
+- One spec name, several values: type the first value, click `+增加规格值`, type the next. Keep the order the
+  queue gives you (single unit first, case row after) — a row added later can only be appended, so a wrong
+  order means deleting and re-typing the values.
+- SKU rows appear in value order. Fill the numeric inputs by index using `fields.spec.skuFieldOrder` (price,
+  stock, points, …) and read all of them back before submitting; do not use the bulk-fill widget when rows
+  differ.
+- Editing an existing product's spec values resets the numbers on those rows; re-fill and re-read them.
 
 ## Submit and resume
 

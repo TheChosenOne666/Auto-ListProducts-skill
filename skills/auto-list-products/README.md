@@ -12,42 +12,52 @@ costs one guided probe, not a code change.
 0. **Preflight.** Check the browser-control channel (if the connector/extension is missing, stop and help
    the user install and connect it), confirm real input events are possible, check Python deps, confirm
    the session is logged in, and agree `fill-only` vs `fill-and-submit`.
-1. **Probe.** Open the create form, read the required fields and one stable locator each, dump the category
-   tree level by level, note pre-checked defaults, and find the verification hooks (stored image URL,
-   points echo, confirm dialog, post-submit route). Ask the user: default scope, stock, spec name, root
-   category, whether points exist and how they derive, display counters, case SKU, skip rule, submit mode.
-   Write `profile.json` and validate it with `scripts/check_profile.py`.
+1. **Probe.** Open the create form, read the required fields and one stable locator each, inventory every
+   upload tray (product image, detail images, per-spec-row cell — each with its own crop behaviour), dump
+   the category tree level by level, note pre-checked defaults, and find the verification hooks (stored image
+   URL, points echo, confirm dialog, post-submit route). Ask the user: default scope, stock, spec name, root
+   category, whether points exist and how they derive, display counters, case SKU and how that row is
+   labelled, skip rule, submit mode. Write `profile.json` and validate it with `scripts/check_profile.py`.
 2. **Pilot.** Fill one product end-to-end with the profile. Only after it passes every assertion, scale.
-3. **Crop.** `scripts/crop_square.py` turns screenshots into square images and refuses two failure modes
-   it has seen in the wild: a crop of a product photo that never rendered (blank), and the carousel dots
-   that leak into the bottom edge (capped off and white-padded back to square).
+3. **Crop.** `scripts/crop_square.py` turns screenshots into square images and refuses two failure modes it
+   has seen in the wild: a crop of a product photo that never rendered (blank — never written, retried from
+   the `alt_src` screenshot first) and the carousel dots that leak into the bottom edge (capped off and
+   white-padded back to square). Per-resolution bounds accept an optional bottom edge for photo areas that
+   are shorter than the image width.
 4. **Extract.** Record title, size/unit, units per case, retail, case supply, image, category key. Unreadable
    values are asked, never guessed. Arithmetic is sanity-checked: a bundle is one unit, its cost is
    single-pack cost × packs.
-5. **Sheet (optional).** `scripts/fill_xlsx.py` appends rows without breaking formulas — the supply price
-   stays numeric and the case pack is shown with `number_format`.
-6. **Queue.** `scripts/make_queue.py` builds resumable jobs. Points, display counters, a coupon floor and
-   the case SKU row are all opt-in; there is no built-in business rule.
-7. **Fill loop.** For each job: fresh form, upload both images and verify the stored bytes, fill name →
-   category → scope → spec values → SKU rows, verify every field against the queue, submit only in
-   `fill-and-submit` mode, assert the route changed, persist progress.
+5. **Sheet (optional).** `scripts/fill_xlsx.py` appends rows without breaking formulas — it finds the first
+   empty row itself, keeps the supply price numeric (case pack via `number_format`), writes a literal coupon
+   for rows that have no supply price, inherits the previous row's border and forces black text.
+6. **Queue.** `scripts/make_queue.py --profile profile.json` builds resumable jobs from the profile: root
+   category, path separator, case-row label template, points policy, coupon floor, display counters, stock
+   and spec name. Same name + same retail is dropped as a duplicate; a missing value, unknown category key or
+   impossible coupon aborts without writing a queue. Flags override the profile for one run only.
+7. **Fill loop.** For each job: fresh form, upload each tray the profile declares and verify the stored
+   bytes, fill name → category → scope → spec values → SKU rows, verify every field against the queue, submit
+   only in `fill-and-submit` mode, assert the route changed, persist `state.json`.
 8. **Audit.** Rescan the list for duplicates and gaps, spot-check hosted images, report.
 
 ## Contents
 
 ```
 SKILL.md                        the run, the preflight, the fill loop, the gates
-profile.example.json            what the probe produces
-references/probe-checklist.md   the 10-step discovery procedure behind the probe
+profile.example.json            what the probe produces (trays, locators, defaults, business policy)
+references/probe-checklist.md   the 11-step discovery procedure behind the probe
 references/browser-playbook.md  uploads, real input events, tab handoff, window hygiene
 references/pitfalls.md          failure catalogue: symptom → cause → fix
 scripts/check_profile.py        refuse a half-probed profile before touching products
 scripts/crop_square.py          square crops + blank and carousel-dot guards + contact sheet
 scripts/check_images.py         blank-image audit for local files or hosted URLs
-scripts/make_queue.py           facts → queue (optional points / counters / skip rule)
+scripts/make_queue.py           facts + profile → queue
 scripts/fill_xlsx.py            append rows without breaking formulas
 evals/evals.json                test briefs with expected behaviour
 ```
+
+The repo also runs `tests/smoke.py` in CI on both Linux and Windows: it builds screenshots, a profile and a
+workbook, runs every script and asserts on the artifacts, so a script that compiles but misbehaves fails the
+build on the platform the operator actually uses.
 
 ## Requirements
 

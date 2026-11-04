@@ -12,6 +12,13 @@ note that and close the form without saving when you finish probing.
 - record the list URL as `form.listUrl`.
 - log out is not something you test; just note the login route fragment you saw, e.g. `/login`, as
   `form.loginUrlPattern`.
+- **if the backend has sections** (self-pickup vs courier, retail vs wholesale): repeat all three for each
+  section and write them under `boards.<key>.form`. Then diff the two forms on the same screen and record
+  what actually differs — the category root, a field one section lacks (a scope picker, a static shipping
+  note), the SKU column order, which toggles arrive on versus off, and whether the numbers move
+  (a coupon that is lower by a fixed amount in the courier section is a `couponOffset`, not a new rule).
+  Do not assume the sections are the same form with different data; that assumption is what fills a
+  courier product with the pickup ruler and lets the page refuse it after the gate said ok.
 
 ## 2. Field inventory
 

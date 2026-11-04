@@ -58,7 +58,11 @@ Do this once per backend (and again after the admin UI changes). Read
 
 The probe answers four questions by inspecting the live create form:
 
-1. **Where is the form** and where is the list? (routes, not guesses)
+1. **Where is the form** and where is the list? (routes, not guesses) If the backend has **sections**
+   (self-pickup vs courier, retail vs wholesale - two forms under one login), probe each one as its own
+   thing: its create URL, its list URL, its category root, the fields it does not have, its SKU column
+   order, and the numbers that differ per section. Record them under `boards.<key>`; a single-section
+   backend simply has no `boards` block.
 2. **Which fields exist and which are required**, with one stable locator each (label/placeholder/role
    text, not brittle CSS classes).
 3. **What is the category tree**, dumped level by level, and how the selected path reads back
@@ -133,8 +137,10 @@ behaviour, so nothing has to be re-typed per batch:
   `business.counters`, the coupon floor follows `business.minCoupon`;
 - same name + same retail is dropped as a duplicate; same name + different price is kept and reported;
 - a missing value, an unknown category key or an impossible coupon aborts the run without writing a queue;
-- `--board pickup` tags every item with the section of the shop it belongs to, so a shop with separate
-  self-pickup and courier sections is audited one section at a time.
+- `--board pickup` is more than a tag when the profile has `boards`: that section's category root, field
+  set, SKU column order, pre-checked controls and `couponOffset` are merged over the top level, every item
+  is tagged, and a run is built per section - never one queue pretending both sections share a ruler.
+  An offset that pushes a coupon to zero or below aborts the run naming the product.
 
 Flags (`--root`, `--points`, `--min-coupon`, `--display-counters`, `--no-case-sku`, `--stock`,
 `--spec-name`, `--board`, `--only`) exist only to override the profile for a single run.
@@ -151,7 +157,7 @@ Follow `references/browser-playbook.md`, driven by `profile.json`. Per product:
 4. read the form back into `actual.json` (`actual.example.json`) and run the pre-submit gate:
 
    ```bash
-   python scripts/verify_item.py --profile profile.json --queue queue.json --n 7 --actual actual.json
+   python scripts/verify_item.py --profile profile.json --queue queue.json --n 7 --actual actual.json --board express
    ```
 
    It checks name, the exact category path, scope, spec name, spec-value order, SKU row count, price,

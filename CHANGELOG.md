@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0 — 2026-11-04
+
+Back offices with sections - self-pickup and courier, retail and wholesale - are one login but not one form.
+
+- `profile.json` gained an optional `boards` block: per section its own create/list URLs, category root,
+  field set (`without: ["scope"]`), SKU column order, pre-checked controls and `couponOffset`.
+  A profile without it behaves exactly as before, and nothing about a section is hardcoded.
+- `--board <key>` became the switch instead of a label. `make_queue` merges that section over the top level,
+  tags every item, keeps retail prices fixed while moving the coupon and what derives from it, and aborts
+  naming the product when an offset pushes a coupon to zero or below. `verify_item` measures with that
+  section's ruler - a field the section lacks is skipped with the section named, a column it demands
+  (weight, volume) is required - so a courier form is never judged by the pickup checklist. Both refuse an
+  unknown key with exit 2 and list the real ones.
+- `check_profile.py` validates each section (label, complete form pair, known override keys, numeric offset)
+  and prints them side by side, so what the user confirms is two shapes rather than one blurred profile.
+  The top-level `form.newUrl` is now satisfied by the top level or by every section.
+- The sandbox grew the second section for real: the courier form drops the scope picker for a static
+  shipping note, adds a required volume column, and ships with the listed toggle off; lists and snapshots
+  are per section, and the seed covers both. `sandbox/README.md` documents all of it, and
+  `tests/sandbox_static.py` now matches trap definitions rather than error wording.
+- probe checklist step 1 gained the section inventory - repeat the routes per section and diff the two forms
+  on screen, because "same form, different data" is exactly the assumption that fills a courier product
+  with the pickup ruler.
+- `tests/smoke.py` grew to 165 assertions (26 of them for sections), Linux and Windows both green.
+
 ## 0.4.0 — 2026-11-04
 
 The flow became runnable without a real store, and the evals became an experiment instead of a wish.

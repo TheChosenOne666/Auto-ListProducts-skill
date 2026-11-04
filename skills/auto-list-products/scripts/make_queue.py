@@ -47,6 +47,12 @@ import argparse
 import json
 import sys
 
+# a queue is built from the user's own names and labels, and a Windows console opens on a
+# legacy codepage that raises UnicodeEncodeError halfway through printing them
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 REQUIRED_KEYS = ["n", "name", "size", "unit", "per", "supply", "retail", "cat", "img"]
 
 

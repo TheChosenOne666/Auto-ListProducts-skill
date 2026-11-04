@@ -39,6 +39,12 @@ import sys
 import openpyxl
 from openpyxl.styles import Alignment, Font
 
+# the sheet is written in the user's language, and a Windows console opens on a legacy codepage
+# that raises UnicodeEncodeError halfway through printing a row
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 def last_filled_row(ws, name_col: str) -> int:
     """Last row with a product name - ws.max_row lies, these sheets end in styled empty rows."""

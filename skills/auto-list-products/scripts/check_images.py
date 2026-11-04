@@ -24,6 +24,12 @@ import urllib.request
 
 from PIL import Image
 
+# image names come from the user's catalogue, and a Windows console opens on a legacy codepage
+# that raises UnicodeEncodeError halfway through printing them
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 DEFAULT_EXTS = "jpg,jpeg,png,webp"
 
 

@@ -30,6 +30,8 @@ Added / fixed:
   blanks), writes rows that have no supply price, inherits the previous row's border, forces black text over
   leftover red template font, flags the workbook for recalc on open, and refuses to overwrite filled rows.
 - `SKILL.md` documents the `state.json` resume record that Phase 6 and the evals had been referring to.
+- Every script now reconfigures stdout/stderr to UTF-8: a Windows console opens on cp1252/cp936 and died with
+  `UnicodeEncodeError` halfway through printing a Chinese product name. The first Windows CI run caught this.
 - References: tray inventory in the probe checklist (now 11 steps), tray-driven upload loop, plus catalogue
   entries for blank crops written to disk, extensions lying about format, a submit that silently does
   nothing, reviewed listings that refuse to save, and a queue drifting from the profile.

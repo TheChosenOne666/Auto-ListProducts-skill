@@ -35,6 +35,12 @@ import sys
 
 from PIL import Image
 
+# a crop report is full of the user's own file names, and a Windows console opens on a legacy
+# codepage that raises UnicodeEncodeError halfway through printing them
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 DEFAULT_WINDOWS = "1440x3200:285,1280x2844:245"
 
 

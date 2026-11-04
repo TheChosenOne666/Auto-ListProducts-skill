@@ -67,6 +67,16 @@ Fix: back up the current field values and images, delete the listing, then creat
 status to fall back to "pending review", and confirm the old row really disappeared before relisting so the
 batch does not end up with two copies.
 
+## Batch dies halfway with UnicodeEncodeError
+
+Symptom: a script that ran fine in a Linux or UTF-8 terminal crashes on a Windows console while printing a
+product name or a report line, leaving a batch half-finished.
+Cause: the console opens on a legacy codepage (cp936/cp1252), so writing the user's own Chinese labels raises
+before the line reaches the screen - the data is fine, the stdout encoding is not.
+Fix: the scripts reconfigure stdout/stderr to UTF-8 with replacement at startup, and `tests/smoke.py` asserts
+it under a Chinese product name and case word. If you add a script to this skill, do the same or it will fail
+on the first batch that carries real names.
+
 ## Queue disagrees with the profile
 
 Symptom: the numbers filled into the form are not what the user agreed to; the flags were re-typed per batch.

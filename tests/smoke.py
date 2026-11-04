@@ -100,6 +100,9 @@ def make_profile(tmp: Path) -> Path:
 
 
 def test_profile(tmp: Path) -> Path:
+    res = run("check_profile.py", EXAMPLE_PROFILE)
+    check(res.returncode == 0,
+          "check_profile prints the shipped example, whose placeholders are Chinese, and survives the console codepage")
     profile = make_profile(tmp)
     res = run("check_profile.py", profile)
     check(res.returncode == 0, f"check_profile accepts the filled example (stderr={res.stderr[:120]})")
@@ -184,7 +187,7 @@ def test_images(tmp: Path) -> None:
 
 def test_queue(tmp: Path, profile: Path) -> None:
     products = [
-        {"n": 1, "name": "Item A", "size": "500ml", "unit": "bottle", "per": 15, "cu": "case",
+        {"n": 1, "name": "Item A", "size": "500ml", "unit": "bottle", "per": 15, "cu": "箱",
          "supply": 31.5, "retail": 3.0, "cat": "TEA", "img": "clean.jpg"},
         {"n": 2, "name": "Item B", "size": "330ml", "unit": "can", "per": 24, "cu": "case",
          "supply": 60, "retail": 3.5, "cat": "SODA", "img": "rescued.jpg", "stock": 50},
@@ -206,7 +209,7 @@ def test_queue(tmp: Path, profile: Path) -> None:
     check("duplicates dropped" in res.stdout, "the dropped duplicate is reported")
     a = queue[0]
     check(a["expectCat"] == "RootCat / Drink / Tea", "expectCat uses the profile separator and root")
-    check(a["v2"] == "15bottle*case", "case label comes from the profile template")
+    check(a["v2"] == "15bottle*箱", "case label comes from the profile template, in the user's language")
     check(a["stock"] == 10000 and queue[1]["stock"] == 50, "stock comes from the profile, per-product wins")
     check(a["specName"] == "SpecName", "specName comes from the profile")
     check(a["pt1"] == 0.9 and a["pt2"] == 13.5, "points derived from the coupon per pointsMode")
@@ -259,7 +262,7 @@ def test_xlsx(tmp: Path) -> None:
 
     rows = tmp / "rows.json"
     rows.write_text(json.dumps([
-        {"name": "Item A 500ml", "retail": 3.0, "supply": 31.5, "per": 15, "unit": "bottle", "cu": "case"},
+        {"name": "示例商品 500ml", "retail": 3.0, "supply": 31.5, "per": 15, "unit": "瓶", "cu": "箱"},
         {"name": "Whole item", "retail": 238, "coupon": 88},
     ], ensure_ascii=False), encoding="utf-8")
 
@@ -268,10 +271,10 @@ def test_xlsx(tmp: Path) -> None:
 
     after = load_workbook(path)
     ws = after["登记"]
-    check(ws["D4"].value == "Item A 500ml" and ws["E4"].value == 3.0, "auto-detected the first empty row")
+    check(ws["D4"].value == "示例商品 500ml" and ws["E4"].value == 3.0, "auto-detected the first empty row")
     check(str(ws["F4"].value).startswith("=ROUND(E4-H4"), "coupon stays a formula")
     check(ws["G4"].value == 31.5 and isinstance(ws["G4"].value, float), "supply stays numeric")
-    check("case*15bottle" in ws["G4"].number_format, "case pack shown via number_format")
+    check("箱*15瓶" in ws["G4"].number_format, "case pack shown via number_format")
     check(str(ws["H4"].value).startswith("=ROUND(G4/15"), "unit cost stays a formula")
     check(ws["F5"].value == 88 and ws["G5"].value is None and ws["H5"].value is None,
           "no-supply row writes a literal coupon and leaves supply/cost empty")

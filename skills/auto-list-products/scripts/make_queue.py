@@ -64,6 +64,10 @@ def load(path: str):
         raise SystemExit(f"no such file: {path}")
     except json.JSONDecodeError as exc:
         raise SystemExit(f"{path} is not valid JSON: {exc}")
+    except UnicodeDecodeError as exc:
+        raise SystemExit(f"{path} is not UTF-8 text ({exc}); save the manifest as UTF-8")
+    except OSError as exc:
+        raise SystemExit(f"cannot read {path}: {exc}")
 
 
 def case_label(template: str, per: int, unit: str, cu: str | None) -> str:

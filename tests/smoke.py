@@ -489,7 +489,8 @@ def test_reconcile(tmp: Path) -> None:
     check(set(diff) >= {"missing", "duplicates", "price", "structure", "status", "extras"},
           "--out writes the diff with all categories")
     res = rec("--expected", q, "--listings", s, "--board", "pickup", "--out", tmp / "nodir" / "diff.json")
-    check(res.returncode == 2 and "cannot write the diff" in res.stderr, "a diff that cannot be written exits 2")
+    check(res.returncode == 0 and "WARN cannot write the diff" in res.stderr,
+          "an unwritable diff path warns but keeps the verdict's exit code")
 
     # 14. regressions a cross-review found, each pinned by its own input
     check(module.normalize_spec("500ml*1瓶") != module.normalize_spec("500ml*2瓶"),
@@ -526,6 +527,270 @@ def test_reconcile(tmp: Path) -> None:
           "the header states when the snapshot was taken")
 
 
+def vprofile(mode="fill-and-submit"):
+    tray = lambda key, label, crop, bind, optional=False: {
+        "key": key, "label": label, "bind": bind, "crop": crop, "maxCount": 5,
+        "uploadTrigger": {"by": "role+name", "value": f"upload-{key}"},
+        "thumbLocator": {"by": "css", "value": f".thumb-{key}"},
+        "removeLocator": {"by": "css", "value": f".remove-{key}"},
+        **({"optional": True} if optional else {}),
+        **({"cropConfirm": {"by": "role+name", "value": "裁剪并上传"}} if crop == "square" else {})}
+    return {
+        "platform": "verify-test",
+        "form": {"newUrl": "https://test.invalid/new", "listUrl": "https://test.invalid/list"},
+        "image": {"minBytes": 50000, "trays": [tray("main", "商品图", "square", "product"),
+                                               tray("detail", "详情图", "any", "product"),
+                                               tray("sku", "规格图", "square", "sku", optional=True)]},
+        "fields": {
+            "name": {"locator": {"by": "placeholder", "value": "请输入商品名称"}, "maxLength": 42},
+            "category": {"kind": "cascader", "locator": {"by": "placeholder", "value": "请选择类目"},
+                         "expectedSeparator": " / "},
+            "scope": {"locator": {"by": "css", "value": ".scope"}, "value": "全域自提点"},
+            "spec": {"nameLocator": {"by": "placeholder", "value": "规格名"},
+                     "valueLocator": {"by": "placeholder", "value": "规格值"},
+                     "skuInputsLocator": {"by": "css", "value": ".sku input"},
+                     "skuFieldOrder": ["price", "stock", "points"],
+                     "caseSkuLabel": "{per}{unit}*{cu}"}},
+        "defaults": {"stock": 10000, "specName": "规格", "rootCategory": "RootCat",
+                     "checkedToStart": ["现金+积分", "条幅", "抽佣继承"]},
+        "business": {"mode": mode, "pointsMode": "coupon", "minCoupon": 0, "counters": True, "caseSku": True},
+    }
+
+
+def vitem(**over):
+    item = {"n": 1, "name": "示例商品500ml", "expectCat": "RootCat / 饮料 / 茶饮料",
+            "specName": "规格", "v1": "500ml*1瓶", "v2": "15瓶*箱",
+            "price1": 3.0, "price2": 45.0, "pt1": 0.8, "pt2": 12.0, "stock": 10000,
+            "sales": 137, "fav": 271}
+    item.update(over)
+    return item
+
+
+def vactual(**over):
+    actual = {"name": "示例商品500ml", "category": "RootCat / 饮料 / 茶饮料", "scope": "全域自提点",
+              "specName": "规格", "specValues": ["500ml*1瓶", "15瓶*箱"],
+              "skuRows": [{"price": 3.0, "stock": 10000, "points": 0.8},
+                          {"price": 45.0, "stock": 10000, "points": 12.0}],
+              "sales": 137, "fav": 271, "checked": 3,
+              "images": [{"tray": "main", "bytes": 152341}, {"tray": "detail", "bytes": 201144}],
+              "submitted": False}
+    actual.update(over)
+    return actual
+
+
+def test_verify(tmp: Path) -> None:
+    folder = tmp / "verify"
+    folder.mkdir(exist_ok=True)
+    tmp = folder
+
+    profile = tmp / "profile.json"
+    profile.write_text(json.dumps(vprofile(), ensure_ascii=False), encoding="utf-8")
+    queue = tmp / "queue.json"
+    queue.write_text(json.dumps([vitem(), vitem(n=2, name="第二件")], ensure_ascii=False), encoding="utf-8")
+    good = tmp / "actual.json"
+    good.write_text(json.dumps(vactual(), ensure_ascii=False), encoding="utf-8")
+
+    def run_v(*args):
+        return subprocess.run([sys.executable, str(SCRIPTS / "verify_item.py"), *[str(a) for a in args]],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+    base = [profile, "--actual", good]
+    res = run_v("--profile", *base, "--queue", queue, "--n", 1)
+    check(res.returncode == 0 and "VERDICT: ok" in res.stdout, "a correct listing passes every rule")
+    for rule in ("name", "category", "scope", "spec values", "spec order", "sku rows", "sku price",
+                 "sku stock", "sku points", "sales", "fav", "images", "pre-checked", "submit mode"):
+        check(f"PASS" in res.stdout and rule in res.stdout, f"the rule {rule!r} is checked and reported")
+
+    def actual_case(slug, **over):
+        path = tmp / f"actual-{slug}.json"
+        path.write_text(json.dumps(vactual(**over), ensure_ascii=False), encoding="utf-8")
+        return run_v("--profile", profile, "--actual", path, "--queue", queue, "--n", 1)
+
+    res = actual_case("cat-off", category="RootCat / 饮料 / 茶饮料 / 绿茶")
+    check(res.returncode == 1 and "FAIL category" in res.stdout, "an extra category level is a failure")
+    res = actual_case("cat-parent", category="RootCat / 饮料")
+    check(res.returncode == 1 and "FAIL category" in res.stdout,
+          "a parent node whose label contains the leaf is not accepted as a match")
+    res = actual_case("order", specValues=["15瓶*箱", "500ml*1瓶"],
+                      skuRows=[{"price": 45.0, "stock": 10000, "points": 12.0},
+                               {"price": 3.0, "stock": 10000, "points": 0.8}])
+    check("FAIL spec order" in res.stdout and "before the unit row" in res.stdout,
+          "a case row sitting before the unit row is blocked - rows can only be appended")
+    res = actual_case("rows", skuRows=[{"price": 3.0, "stock": 10000, "points": 0.8}])
+    check("FAIL sku rows" in res.stdout and "1 rows for 2 spec values" in res.stdout,
+          "fewer SKU rows than spec values is blocked")
+    res = actual_case("price", skuRows=[{"price": 3.1, "stock": 10000, "points": 0.8},
+                                        {"price": 45.0, "stock": 10000, "points": 12.0}])
+    check("FAIL sku price" in res.stdout and "expected 3.0 got 3.1" in res.stdout,
+          "a price one tenth off is named with both numbers")
+    res = actual_case("stock", skuRows=[{"price": 3.0, "stock": 500, "points": 0.8},
+                                        {"price": 45.0, "stock": 10000, "points": 12.0}])
+    check("FAIL sku stock" in res.stdout and "expected 10000 got 500" in res.stdout, "stock drift is blocked")
+
+    array_rows = tmp / "actual-array.json"
+    array_rows.write_text(json.dumps(vactual(skuRows=[[3.0, 10000, 0.8], [45.0, 10000, 12.0]]),
+                                     ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", array_rows, "--queue", queue, "--n", 1)
+    check(res.returncode == 0, "rows dumped as arrays are keyed by the profile's skuFieldOrder and still pass")
+    no_order = json.loads(profile.read_text(encoding="utf-8"))
+    no_order["fields"]["spec"].pop("skuFieldOrder")
+    no_order_path = tmp / "profile-noorder.json"
+    no_order_path.write_text(json.dumps(no_order, ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", no_order_path, "--actual", array_rows, "--queue", queue, "--n", 1)
+    check(res.returncode == 2 and "skuFieldOrder" in res.stderr,
+          "array rows without a declared field order are refused, not guessed")
+
+    no_points = tmp / "queue-nopoints.json"
+    no_points.write_text(json.dumps([vitem(pt1=None, pt2=None)], ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", good, "--queue", no_points, "--n", 1)
+    check(res.returncode == 0 and "SKIP sku points" in res.stdout,
+          "a queue item without points skips that dimension instead of failing it")
+
+    res = actual_case("white", images=[{"tray": "main", "bytes": 8123}, {"tray": "detail", "bytes": 201144}])
+    check("FAIL images" in res.stdout and "white crop" in res.stdout and "main" in res.stdout,
+          "a stored image under the byte floor is named as a white crop, per tray")
+    res = actual_case("notray", images=[{"tray": "main", "bytes": 152341}])
+    check("FAIL images" in res.stdout and "detail" in res.stdout,
+          "a required upload slot with no read-back entry is blocked")
+    res = actual_case("local-size", images=[{"tray": "main", "bytes": None}, {"tray": "detail", "bytes": 2}])
+    check("FAIL images" in res.stdout and "stored byte size" in res.stdout,
+          "no stored byte size is a failure; the local file size is not evidence")
+
+    fill_only = tmp / "profile-fillonly.json"
+    fill_only.write_text(json.dumps(vprofile(mode="fill-only"), ensure_ascii=False), encoding="utf-8")
+    submitted = tmp / "actual-submitted.json"
+    submitted.write_text(json.dumps(vactual(submitted=True), ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", fill_only, "--actual", submitted, "--queue", queue, "--n", 1)
+    check(res.returncode == 1 and "OUT-OF-MODE" in res.stdout,
+          "submitting while the agreed mode is fill-only is blocked and labelled out-of-mode")
+
+    res = actual_case("checked", checked=2)
+    check("FAIL pre-checked" in res.stdout and "3" in res.stdout,
+          "the pre-checked control count is asserted against what the probe recorded")
+    res = actual_case("name", name="示例商品500ml ")
+    check(res.returncode == 0, "surrounding whitespace in the name is not treated as a difference")
+    long_name = "名" * 43
+    long_queue = tmp / "queue-longname.json"
+    long_queue.write_text(json.dumps([vitem(name=long_name)], ensure_ascii=False), encoding="utf-8")
+    long_actual = tmp / "actual-longname.json"
+    long_actual.write_text(json.dumps(vactual(name=long_name), ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", long_actual, "--queue", long_queue, "--n", 1)
+    check("FAIL name" in res.stdout and "at most 42" in res.stdout,
+          "a queue name that cannot fit the form is blocked before anyone types it")
+
+    res = run_v("--profile", profile, "--actual", good, "--queue", queue, "--n", 2)
+    check(res.returncode == 1 and "FAIL name" in res.stdout,
+          "reading back the wrong product's page is a name failure, not a pass")
+
+    missing_actual = tmp / "actual-partial.json"
+    missing_actual.write_text(json.dumps({"name": "示例商品500ml"}, ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", missing_actual, "--queue", queue, "--n", 1)
+    check(res.returncode == 1 and "FAIL category" in res.stdout and "FAIL sku rows" in res.stdout,
+          "a read-back that omits required fields fails them instead of skipping silently")
+
+    res = run_v("--profile", profile, "--actual", good)
+    check(res.returncode == 2 and "--queue" in res.stderr, "neither --item nor --queue is refused with exit 2")
+    res = run_v("--profile", profile, "--actual", good, "--queue", queue, "--n", 99)
+    check(res.returncode == 2 and "no item with n=99" in res.stderr, "an unknown queue number is refused")
+    res = run_v("--profile", tmp / "missing.json", "--actual", good, "--queue", queue, "--n", 1)
+    check(res.returncode == 2, "a missing file is refused with exit 2")
+    bad_profile = tmp / "profile-broken.json"
+    bad_profile.write_text(json.dumps({"platform": "x"}, ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", bad_profile, "--actual", good, "--queue", queue, "--n", 1)
+    check(res.returncode == 2 and "check_profile" in res.stderr, "a non-profile is refused and pointed at the validator")
+    res = run_v("--profile", profile, "--actual", queue, "--queue", queue, "--n", 1)
+    check(res.returncode == 2 and "expected an object" in res.stderr, "a read-back that is a list is refused")
+
+    single = tmp / "item.json"
+    single.write_text(json.dumps(vitem(), ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", good, "--item", single)
+    check(res.returncode == 0, "--item takes a single extracted queue entry")
+
+    again = run_v("--profile", profile, "--actual", good, "--queue", queue, "--n", 1)
+    check(res.stdout == again.stdout, "the same inputs produce the same verdict, byte for byte")
+
+    res = run_v("--profile", profile, "--actual", good, "--queue", queue, "--n", 1, "--out", tmp / "verdict.json")
+    verdict = json.loads((tmp / "verdict.json").read_text(encoding="utf-8"))
+    check(res.returncode == 0 and verdict["verdict"] == "ok" and len(verdict["checks"]) >= 14,
+          "--out writes the per-rule verdict")
+    res = run_v("--profile", profile, "--actual", good, "--queue", queue, "--n", 1, "--out", tmp / "no" / "v.json")
+    check(res.returncode == 0 and "WARN cannot write the verdict" in res.stderr,
+          "an unwritable verdict path warns instead of masking the verdict")
+    blocked_actual = tmp / "actual-blocked-out.json"
+    blocked_actual.write_text(json.dumps(vactual(skuRows=[{"price": 9.9, "stock": 1, "points": 1},
+                                                           {"price": 1, "stock": 1, "points": 1}]),
+                                         ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", blocked_actual, "--queue", queue, "--n", 1,
+                "--out", tmp / "no" / "v.json")
+    check(res.returncode == 1 and "VERDICT: blocked" in res.stdout,
+          "a blocked verdict survives a failed archive write")
+
+    # 15. regressions from the cross-review: the gate must not bless what it never compared
+    extra = tmp / "actual-extra-specs.json"
+    extra.write_text(json.dumps(vactual(specValues=["500ml*1瓶", "15瓶*箱", "999ml*2瓶"],
+                                         skuRows=[{"price": 3.0, "stock": 10000, "points": 0.8},
+                                                  {"price": 45.0, "stock": 10000, "points": 12.0},
+                                                  {"price": 18.0, "stock": 10000, "points": 6}]),
+                                 ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", extra, "--queue", queue, "--n", 1)
+    check(res.returncode == 1 and "does not declare" in res.stdout,
+          "a third spec value the queue never declared is blocked, not silently unchecked")
+    res = run_v("--profile", profile, "--actual", extra, "--queue", queue, "--n", 1, "--allow-extra-specs")
+    check(res.returncode == 0 and "rows [3] have no values in the queue item" in res.stdout,
+          "opting in for real variants still says out loud which rows went unchecked")
+    declared_queue = tmp / "queue-variants.json"
+    declared_queue.write_text(json.dumps([vitem(specValues=["500ml*1瓶", "250ml*2瓶", "750ml*3瓶"])],
+                                          ensure_ascii=False), encoding="utf-8")
+    variants_actual = tmp / "actual-variants.json"
+    variants_actual.write_text(json.dumps(vactual(specValues=["500ml*1瓶", "250ml*2瓶"],
+                                                   skuRows=[{"price": 3.0, "stock": 10000, "points": 0.8},
+                                                            {"price": 6.0, "stock": 10000, "points": 1.6}]),
+                                          ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", variants_actual, "--queue", declared_queue, "--n", 1)
+    check(res.returncode == 1 and "not on the form" in res.stdout and "750ml*3瓶" in res.stdout,
+          "a variant the plan declares but the form lacks is blocked")
+    variants_actual2 = tmp / "actual-variants-ok.json"
+    variants_actual2.write_text(json.dumps(vactual(specValues=["500ml*1瓶", "250ml*2瓶", "750ml*3瓶"],
+                                                    skuRows=[{"price": 3.0, "stock": 10000, "points": 0.8},
+                                                             {"price": 6.0, "stock": 10000, "points": 1.6},
+                                                             {"price": 9.0, "stock": 10000, "points": 2.4}]),
+                                           ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", variants_actual2, "--queue", declared_queue, "--n", 1)
+    check(res.returncode == 0 and "rows [1]" not in res.stdout,
+          "declared variants match exactly, so nothing is left unchecked")
+
+    breadcrumb = tmp / "actual-breadcrumb.json"
+    breadcrumb.write_text(json.dumps(vactual(category="RootCat > 饮料 > 茶饮料"), ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", profile, "--actual", breadcrumb, "--queue", queue, "--n", 1)
+    check(res.returncode == 0, "the page's own path separator is folded; the match is segment by segment")
+
+    no_floor = json.loads(profile.read_text(encoding="utf-8"))
+    no_floor["image"]["minBytes"] = 0
+    no_floor_path = tmp / "profile-nofloor.json"
+    no_floor_path.write_text(json.dumps(no_floor, ensure_ascii=False), encoding="utf-8")
+    small_images = tmp / "actual-small.json"
+    small_images.write_text(json.dumps(vactual(images=[{"tray": "main", "bytes": 900},
+                                                        {"tray": "detail", "bytes": 900}]),
+                                       ensure_ascii=False), encoding="utf-8")
+    res = run_v("--profile", no_floor_path, "--actual", small_images, "--queue", queue, "--n", 1)
+    check(res.returncode == 0, "an explicit minBytes of 0 means no floor, not the default 50 KB")
+
+    gbk_actual = tmp / "actual-gbk.json"
+    gbk_actual.write_bytes(json.dumps(vactual(), ensure_ascii=False).encode("gbk"))
+    res = run_v("--profile", profile, "--actual", gbk_actual, "--queue", queue, "--n", 1)
+    check(res.returncode == 2 and "not UTF-8" in res.stderr,
+          "a non-UTF-8 read-back is an input error (2), never a verdict (1) an agent would re-try")
+    res = run_v("--profile", profile, "--actual", tmp / "actual-price.json", "--queue", queue, "--n", 1, "--quiet")
+    check("PASS" not in res.stdout and "FAIL sku price" in res.stdout, "--quiet hides the passing rules")
+
+    source = (SCRIPTS / "verify_item.py").read_text(encoding="utf-8")
+    check(not any(tok in source for tok in ("urllib", "socket", "requests", "http.client")),
+          "verify_item compares files only - no network module in the source")
+    example = json.loads((ROOT / "skills" / "auto-list-products" / "actual.example.json").read_text(encoding="utf-8"))
+    check({"name", "category", "specValues", "skuRows", "images", "submitted"} <= set(example),
+          "actual.example.json documents every field the script reads")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -535,6 +800,7 @@ def main() -> int:
         test_queue(tmp, profile)
         test_xlsx(tmp)
         test_reconcile(tmp)
+        test_verify(tmp)
     if failures:
         print(f"\n{len(failures)} smoke failures:")
         for f in failures:

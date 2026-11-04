@@ -143,6 +143,10 @@ def load_json(path: str):
         raise InputError(f"no such file: {path}")
     except json.JSONDecodeError as exc:
         raise InputError(f"{path} is not valid JSON: {exc}")
+    except UnicodeDecodeError as exc:
+        raise InputError(f"{path} is not UTF-8 text ({exc}); save the snapshot as UTF-8")
+    except OSError as exc:
+        raise InputError(f"cannot read {path}: {exc}")
 
 
 def load_expected(path: str, fmt_hint: str, sheet: str, cols: str, board: str | None) -> list[dict]:
@@ -453,10 +457,9 @@ def main() -> int:
     if args.out:
         try:
             Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+            print(f"diff written: {args.out}")
         except OSError as exc:
-            print(f"cannot write the diff to {args.out}: {exc}", file=sys.stderr)
-            return 2
-        print(f"diff written: {args.out}")
+            print(f"WARN cannot write the diff to {args.out}: {exc}", file=sys.stderr)
     return code
 
 

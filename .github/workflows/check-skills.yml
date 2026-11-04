@@ -7,7 +7,17 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # the operator machines running these scripts are Windows, so the pipeline must prove
+    # itself on both - path handling is where the two platforms disagree
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - uses: actions/checkout@v4
 
@@ -62,10 +72,13 @@ jobs:
           PY
 
       - name: Scripts compile
-        run: python -m py_compile skills/auto-list-products/scripts/*.py
+        run: python -m py_compile skills/auto-list-products/scripts/*.py tests/*.py
 
       - name: Example profile validates
         run: python skills/auto-list-products/scripts/check_profile.py skills/auto-list-products/profile.example.json
+
+      - name: Smoke test the scripts end to end
+        run: python tests/smoke.py
 
       - name: Evals parse
         run: |

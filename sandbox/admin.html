@@ -95,6 +95,11 @@ function spec(name, price, points, weight, stock, volume, listed) {
 var BOARDS = {pickup: "到店自提", express: "快递发货"};
 var REQUIRED_COLUMNS = {pickup: ["price", "stock", "points", "weight"],
                         express: ["price", "stock", "points", "weight", "volume"]};
+var SUBMIT_CONFIRM = "确认提交审核？提交后进入待审核，审核通过前不会上架。";
+// 上传槽的真实属性：主图必填且需方图，详情图可空可多张，规格图逐行绑定且可空。
+var TRAY_MAIN = {key: "f-main", tray: "main", crop: "square", max: 1, bind: "product", optional: false, accepts: ["jpg", "png"]};
+var TRAY_DETAIL = {key: "f-detail", tray: "detail", crop: "any", max: 5, bind: "product", optional: true, accepts: ["jpg", "png"]};
+var TRAY_SKU = {tray: "sku", crop: "square", max: 1, bind: "sku", optional: true, accepts: ["jpg", "png"]};
 var board = "pickup";
 
 function seed() {
@@ -169,6 +174,128 @@ function snapshot(which) {
 }
 window.__alpSnapshot = snapshot;
 
+// The probe record: what the form looks like right now, read off the live DOM.
+// It exists so `diff_probe.py` can be exercised for real instead of hand-copied.
+// Nothing here is typed by hand: every value is read off the page or derived from the
+// sandbox's own rules, so a dump can never describe a board it did not actually render.
+window.__alpProbeDump = function (which) {
+  var wanted = which || board;
+  if (!BOARDS[wanted]) {
+    throw new Error("unknown board: " + wanted + " (this backend has " + Object.keys(BOARDS).join(" / ") + ")");
+  }
+  // 探测对象必须是目标板块那张表单。已经停在目标表单上时不重渲染，免得把填好的草稿抹掉；
+  // 需要切板块时会重渲染，未提交的草稿随之消失——真实后台切换板块也一样。
+  if (location.hash !== "#/new") { location.hash = "#/new"; }
+  if (board !== wanted || !document.getElementById("f-name")) {
+    board = wanted;
+    route();
+  }
+
+  var fields = [...document.querySelectorAll(".field")].map(function (f) {
+    var label = f.querySelector("label"), control = f.querySelector("input,select");
+    if (!label || !control) { return null; }
+    var role = control.getAttribute("data-role");
+    var out = {label: label.textContent, required: label.className.indexOf("req") >= 0,
+               kind: control.tagName === "SELECT" ? "select" : (control.type === "number" ? "number" : "text"),
+               default: control.value || ""};
+    if (role === "category") { out.kind = "cascader"; }
+    if (control.placeholder) { out.placeholder = control.placeholder; }
+    if (control.maxLength > 0 && control.maxLength < 500) { out.maxLength = control.maxLength; }
+    if (control.tagName === "SELECT") { out.options = [...control.options].map(function (o) { return o.value; }); }
+    if (control.id) { out.locator = {by: "id", value: control.id}; }
+    else if (control.placeholder) { out.locator = {by: "placeholder", value: control.placeholder}; }
+    if (role) { out.role = role; }
+    return out;
+  }).filter(Boolean);
+
+  // SKU 行的列：表头给标签，首行的控件给类型与预填值，拦住提交的判断和 collect() 同源
+  var table = document.querySelector("#sku-wrap table");
+  var headRow = table && table.querySelector("tr");
+  var firstRow = table && table.children[1];
+  if (headRow && firstRow) {
+    [...firstRow.children].forEach(function (td, i) {
+      var control = td.querySelector("input");
+      var key = control ? control.getAttribute("data-field") : null;
+      if (!key) { return; }                                  // 规格值文本格与规格图槽不是可填字段
+      var th = headRow.children[i];
+      var blocking = REQUIRED_COLUMNS[wanted].indexOf(key) >= 0 || (wanted === "express" && key === "listed");
+      fields.push({label: th ? th.textContent : key,
+                   required: !!th && (th.textContent.indexOf("*") >= 0 || th.className.indexOf("req") >= 0),
+                   kind: control.type === "checkbox" ? "checkbox" : (control.type === "number" ? "number" : "text"),
+                   "in": "sku-row", emptyBlocksSubmit: blocking,
+                   default: control.type === "checkbox" ? String(control.checked) : (control.value || ""),
+                   locator: {by: "css", value: '#sku-wrap [data-field="' + key + '"]'}});
+    });
+  }
+
+  // 每个上传控件自己声明它的槽位（key/crop/maxCount/bind/optional/accepts）
+  var seen = {};
+  var trays = [...document.querySelectorAll("[data-tray]")].filter(function (control) {
+    var key = control.getAttribute("data-tray");
+    if (seen[key]) { return false; }
+    seen[key] = true;
+    return true;
+  }).map(function (control) {
+    var label = "";
+    var box = control.closest(".slot");
+    if (box && box.querySelector("h4")) { label = box.querySelector("h4").textContent; }
+    else {
+      var cell = control.closest("td");
+      var line = cell && cell.parentNode;
+      var grid = line && line.closest("table");
+      if (cell && grid && grid.querySelector("tr")) {
+        var head = grid.querySelector("tr").children[[...line.children].indexOf(cell)];
+        label = head ? head.textContent : control.getAttribute("data-tray");
+      }
+    }
+    var out = {key: control.getAttribute("data-tray"), label: label,
+               crop: control.getAttribute("data-crop"), maxCount: Number(control.getAttribute("data-max")),
+               accepts: (control.getAttribute("data-accepts") || "").split(",").filter(Boolean),
+               bind: control.getAttribute("data-bind")};
+    if (control.getAttribute("data-optional") !== null) { out.optional = control.getAttribute("data-optional") === "1"; }
+    return out;
+  });
+
+  // 观察记录从页面事实推导：不标必填却拦住提交、列里预填了值、同名类目
+  var observations = [];
+  fields.forEach(function (f) {
+    if (f["in"] !== "sku-row") { return; }
+    if (f.emptyBlocksSubmit && !f.required && f.kind !== "checkbox") {
+      observations.push(f.label + " 不标必填，但留空会拦住提交");
+    }
+    if (f.kind === "number" && f.default !== "") {
+      observations.push(f.label + " 列预填 " + f.default + "：它是断言对象，不是要填的字段");
+    }
+    if (f.kind === "checkbox" && f.default === "false") {
+      observations.push("「" + f.label + "」默认关" + (f.emptyBlocksSubmit ? "，但至少要打开一行才让提交" : ""));
+    }
+  });
+  (function walk(nodes, trail) {
+    Object.keys(nodes || {}).forEach(function (label) {
+      trail.forEach(function (up) {
+        if (up !== label && up.indexOf(label) >= 0) {
+          observations.push("类目「" + up + "」下还有「" + label + "」，名字互相包含，按文字匹配会点错");
+        }
+      });
+      walk(nodes[label], trail.concat([label]));
+    });
+  })(TREE, []);
+
+  return {
+    capturedAt: new Date().toISOString(),
+    board: wanted,
+    form: {newUrl: location.href.split("#")[0] + "#/new", listUrl: location.href.split("#")[0] + "#/list"},
+    fields: fields,
+    categoryTree: JSON.parse(JSON.stringify(TREE)),
+    separator: SEP,
+    trays: trays,
+    skuColumns: [...document.querySelectorAll("#sku-wrap th")].map(function (t) { return t.textContent; }),
+    submit: {button: document.getElementById("f-submit").textContent, confirm: SUBMIT_CONFIRM,
+             success: "route leaves #/new and the row appears in #/list as pending-review"},
+    observations: observations
+  };
+};
+
 function renderBoardPicker() {
   var pick = document.getElementById("board-pick");
   pick.innerHTML = "";
@@ -216,8 +343,8 @@ function renderForm() {
   var errors = [];
 
   var basic = el("div", { "class": "card" }, [el("h2", { text: "基本信息" })]);
-  var name = el("input", { id: "f-name", placeholder: "请输入商品名称", maxlength: "42" });
-  var scope = el("select", { id: "f-scope" }, [
+  var name = el("input", { id: "f-name", "data-role": "name", placeholder: "请输入商品名称", maxlength: "42" });
+  var scope = el("select", { id: "f-scope", "data-role": "scope" }, [
     el("option", { value: "全域自提点", text: "全域自提点" }),
     el("option", { value: "指定自提点", text: "指定自提点" }),
     el("option", { value: "全部门店", text: "全部门店" })
@@ -239,7 +366,7 @@ function renderForm() {
                               : "当前板块：快递发货（多了必填的体积列，是否上架默认关，没有上架范围）" }));
 
   var specCard = el("div", { "class": "card" }, [el("h2", { text: "规格与 SKU" })]);
-  var specName = el("input", { id: "f-specname", placeholder: "规格名，如 规格", value: "规格" });
+  var specName = el("input", { id: "f-specname", "data-role": "specName", placeholder: "规格名，如 规格", value: "规格" });
   specCard.appendChild(el("div", { "class": "row" }, [field("规格名", specName)]));
   var valuesWrap = el("div", { id: "spec-values" });
   specCard.appendChild(valuesWrap);
@@ -252,8 +379,8 @@ function renderForm() {
 
   var imageCard = el("div", { "class": "card" }, [el("h2", { text: "商品图片" })]);
   var slots = el("div", { "class": "slots" });
-  slots.appendChild(slot("主图（需 1:1 方图，最多 1 张）", "f-main", false));
-  slots.appendChild(slot("详情图（不限比例，可多张）", "f-detail", true));
+  slots.appendChild(slot(TRAY_MAIN, "主图（需 1:1 方图，最多 1 张）", false));
+  slots.appendChild(slot(TRAY_DETAIL, "详情图（不限比例，可多张）", true));
   imageCard.appendChild(slots);
   imageCard.appendChild(el("div", { "class": "hint", text: "上传后回显文件名与字节数：白图通常只有几 KB，对账与校验都靠这个数。" }));
 
@@ -304,6 +431,7 @@ function renderForm() {
   function fileCell(key) {
     files[key] = files[key] || [];
     var input = el("input", { type: "file", id: key, accept: "image/*", "data-slot": key });
+    declareTray(input, TRAY_SKU);
     var info = el("span", { text: "" });
     input.addEventListener("change", function () {
       var chosen = Array.prototype.slice.call(input.files || []);
@@ -335,7 +463,7 @@ function renderForm() {
       return;
     }
     box.textContent = "";
-    askConfirm("确认提交审核？提交后进入待审核，审核通过前不会上架。", function () {
+    askConfirm(SUBMIT_CONFIRM, function () {
       commit(collected());
     });
   });
@@ -414,14 +542,15 @@ function field(label, control, required) {
 }
 
 var files = {};
-function slot(title, key, multiple) {
-  files[key] = files[key] || [];
-  var input = el("input", { type: "file", id: key, accept: "image/*" });
+function slot(spec, title, multiple) {
+  files[spec.key] = files[spec.key] || [];
+  var input = el("input", { type: "file", id: spec.key, accept: "image/*" });
+  declareTray(input, spec);
   if (multiple) { input.setAttribute("multiple", ""); }
   var info = el("div", { "class": "file", text: "尚未上传" });
   input.addEventListener("change", function () {
     var chosen = Array.prototype.slice.call(input.files || []);
-    files[key] = chosen.map(function (f) { return { name: f.name, bytes: f.size }; });
+    files[spec.key] = chosen.map(function (f) { return { name: f.name, bytes: f.size }; });
     info.textContent = chosen.length
       ? chosen.map(function (f) { return f.name + " (" + f.size + " bytes)"; }).join("，")
       : "尚未上传";
@@ -429,12 +558,22 @@ function slot(title, key, multiple) {
   return el("div", { "class": "slot" }, [el("h4", { text: title }), input, info]);
 }
 
+// 槽位的真实属性写在控件上：探测导出只读这些声明，不在别处再抄一份。
+function declareTray(input, spec) {
+  input.setAttribute("data-tray", spec.tray);
+  input.setAttribute("data-crop", spec.crop);
+  input.setAttribute("data-max", String(spec.max));
+  input.setAttribute("data-bind", spec.bind);
+  input.setAttribute("data-optional", spec.optional ? "1" : "0");
+  input.setAttribute("data-accepts", spec.accepts.join(","));
+}
+
 // ---------- 级联类目（逐面板，含同名节点） ----------
 var cascaderValue = "";
 var cascaderPath = [null, null, null];
 function cascaderCard() {
   var wrap = el("div", { "class": "field cascader" });
-  var input = el("input", { id: "f-category", placeholder: "请选择商品类目", readonly: "", value: cascaderValue });
+  var input = el("input", { id: "f-category", "data-role": "category", placeholder: "请选择商品类目", readonly: "", value: cascaderValue });
   var panels = el("div", { "class": "panels", id: "cat-panels" });
   wrap.appendChild(el("label", { "class": "req", text: "商品类目" }));
   wrap.appendChild(input);

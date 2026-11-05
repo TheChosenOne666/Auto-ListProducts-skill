@@ -82,6 +82,15 @@ def main() -> int:
     for route in ("#/new", "#/list", "#/recycle"):
         check(route in html, f"route present: {route}")
     check("window.__alpSnapshot" in html, "the snapshot is exposed for scripted read-back")
+    check("window.__alpProbeDump" in html, "the probe record is exported for real, so drift can be tested")
+    check('getAttribute("data-tray")' in html and html.count("declareTray(input") >= 2,
+          "every upload declares its slot on the control; the dumper reads declarations, not a copy")
+    dumper = html.split("window.__alpProbeDump", 1)[-1].split("\n};", 1)[0] if "window.__alpProbeDump" in html else ""
+    check('label: "' not in dumper and "maxCount: 1" not in dumper and 'crop: "square"' not in dumper,
+          "the dumper types no field, slot or crop rule of its own: a hand-written value is an observation "
+          "nobody made")
+    check("board = wanted;" in html and "REQUIRED_COLUMNS[wanted]" in html,
+          "the export switches to the board it names and takes blocking columns from collect()'s table")
 
     print()
     if failures:

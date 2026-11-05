@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.7.0 — 2026-11-05
+
+The form moves underneath a profile; now there is something that notices.
+
+- `probe-dump.example.json` — the observation, written before the decision: the whole category tree node by
+  node, every field with the marker the page shows **and** the behaviour measured, each slot's `crop`,
+  `maxCount` and whether an empty slot blocks the submit, the SKU column order, the submit wording, the
+  notes. `profile.json` is derived from it; one dump per section, named with its capture time.
+- `scripts/diff_probe.py` answers the two questions a profile cannot answer. *Did the platform change*
+  (probe vs probe: added/removed category nodes, required flips, a slot taking fewer images, columns
+  reordered, submit wording) and *did we copy it wrong* (`--check-profile`: root category, scope option,
+  SKU column count, separator, slot keys/crop/maxCount, name length). Every line carries what the move
+  would break. Same exit contract as the other scripts (0 clean / 1 something moved / 2 unusable input),
+  `--out` writes the same verdict as JSON and a failed write never changes the verdict.
+- Two comparisons are refused rather than answered: dumps from different boards (that is a section
+  difference, not drift; `--cross-board` asks it on purpose and labels the output), and dumps whose
+  `capturedAt` is identical or missing (a pair that cannot be placed in time must not report "no drift").
+- The sandbox exports a real dump now: `window.__alpProbeDump('express')`. Its first version was a lie in a
+  way worth naming - the board argument only relabelled the output, so a pickup form was written out as
+  `board: "express"`, and the SKU-row fields, slot counts and crop rules were typed into the dumper instead
+  of read off the page. It switches section for real (re-rendering, which loses an uncommitted draft exactly
+  as the real UI does), reads every slot attribute from `data-tray` declarations, and takes the
+  blocking-column rule from the same table `collect()` uses. That is how the shipped example turned out
+  wrong: 库存 does block an empty submit, and the example said it did not.
+- Cross-review found six more, each reproduced before it was accepted. The name-length rule was checked
+  against "the first text field that happens to carry a maxLength" - a 商家编码 limit answered for the
+  product name, raising a false alarm when they differed and staying silent when the real name drifted;
+  `rootCategory` only had to appear somewhere in the tree, so a leaf passed as a root and the cascader walk
+  would start a level too low; two controls under one label collapsed into one index entry and losing the
+  duplicate reported "no drift"; a malformed member (a dict in `skuColumns`, a string in `fields`, one
+  sentence written as `observations`) crashed with a traceback that exit-coded 1 - "differences found" -
+  instead of 2; two undated dumps got the same false reassurance the same-capture case was built to stop;
+  and a profile declaring `boards` silently fell back to shop-wide defaults for a section it does not
+  declare, so the same profile was measured by a different ruler than `make_queue` uses. Fixes: name lookup
+  by the recorded `role` with an explicit complaint when no field carries it, root checked against the top
+  level of the tree, occurrence-numbered field keys with the repetition called out, shape validation before
+  any comparison, a single `capture_note` for both timestamp cases, and a complaint when the probed section
+  has no ruler. One test written for the last case was itself wrong: it diffed pickup against express and
+  blamed the guard for refusing.
+- `SKILL.md` Phase 1 writes the dump before the profile and validates the pair; Phase 7 gained re-probe as a
+  named step with the two refusals stated. The checklist says steps 1-8 are observation, that the full tree
+  and the whole header row get recorded even where nothing routes to them, and that measured behaviour is
+  written next to the page's marker, not instead of it. The catalogue gained "the platform moved and a
+  failed listing is how we found out" and "a section difference read as platform drift".
+- `tests/smoke.py` grew to 256 assertions, Linux and Windows both green; `tests/sandbox_static.py` now pins
+  that the dumper types no field, slot or crop rule of its own.
+
 ## 0.6.0 — 2026-11-04
 
 The other half of image intake: a product that arrives with images already, instead of a screenshot.

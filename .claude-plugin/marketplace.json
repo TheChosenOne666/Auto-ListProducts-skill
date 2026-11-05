@@ -1,6 +1,6 @@
 {
   "name": "auto-list-products",
-  "description": "Discovery-first product listing for any web admin backend: probe the form once, then crop, fill, verify and submit a batch.",
+  "description": "Discovery-first product listing for any web admin backend: probe and record the form, then crop, fill, verify, submit - and diff a fresh probe against the record when the platform moves.",
   "owner": {
     "name": "TheChosenOne666",
     "email": "TheChosenOne666@users.noreply.github.com"
@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "auto-list-products",
-      "description": "Bulk product listing skill: environment preflight, platform probe to profile.json, square crops with blank/dot guards, resumable queue, browser form filling with per-field verification before submit.",
-      "version": "0.6.0",
+      "description": "Bulk product listing skill: environment preflight, platform probe recorded as a probe dump then distilled into profile.json, square crops with blank/dot guards, existing images laid into the declared slots, resumable queue, browser form filling with per-field verification before submit, post-batch audit, and a probe diff that catches the platform moving underneath the profile.",
+      "version": "0.7.0",
       "source": "./",
       "skills": ["./skills/auto-list-products"],
       "author": {

@@ -1,7 +1,7 @@
 {
   "name": "auto-list-products",
-  "version": "0.6.0",
-  "description": "Discovery-first product listing for any web admin backend: probe the form once, then crop, fill, verify and submit a batch.",
+  "version": "0.7.0",
+  "description": "Discovery-first product listing for any web admin backend: probe the form, record what it looked like, then crop, fill, verify, submit - and diff the next probe against that record when the platform moves.",
   "author": {
     "name": "TheChosenOne666",
     "url": "https://github.com/TheChosenOne666"
@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "Auto List Products",
     "shortDescription": "Bulk-list products on any admin backend.",
-    "longDescription": "Auto-List-Products probes your own admin form once, writes a platform profile, then runs a resumable listing queue: square image crops with blank and carousel-dot guards, fact extraction, optional registration sheet, browser form filling with per-field verification, and an audit pass.",
+    "longDescription": "Auto-List-Products probes your own admin form once and keeps two artifacts: what the form looked like (probe dump) and what we decided to do about it (profile). Then it runs a resumable listing queue: square image crops with blank and carousel-dot guards, existing assets laid into the declared slots, fact extraction, optional registration sheet, browser form filling with per-field verification before each submit, an audit pass against the live product list, and a probe diff that tells you when the platform changed underneath the profile.",
     "developerName": "TheChosenOne666",
     "category": "Productivity",
     "capabilities": [],
@@ -27,7 +27,8 @@
     "defaultPrompt": [
       "Probe my store admin's create form and prepare it for bulk listing.",
       "Crop these product screenshots and build a listing queue.",
-      "Audit the products I just submitted for blank images and duplicates."
+      "Audit the products I just submitted for blank images and duplicates.",
+      "Check whether the store admin changed since my last probe."
     ]
   }
 }

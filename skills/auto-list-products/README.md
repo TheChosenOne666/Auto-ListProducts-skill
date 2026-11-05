@@ -17,7 +17,11 @@ costs one guided probe, not a code change.
    the category tree level by level, note pre-checked defaults, and find the verification hooks (stored image
    URL, points echo, confirm dialog, post-submit route). Ask the user: default scope, stock, spec name, root
    category, whether points exist and how they derive, display counters, case SKU and how that row is
-   labelled, skip rule, submit mode. Write `profile.json` and validate it with `scripts/check_profile.py`.
+   labelled, skip rule, submit mode. **Write down what you saw before what you decided**: the observation
+   becomes `probe-<board>-<date>.json` (shape: `probe-dump.example.json`, one per section, named with its
+   capture time), `profile.json` is derived from it, validated with `scripts/check_profile.py`, and then held
+   against the observation with `scripts/diff_probe.py probe-x.json --check-profile profile.json` — a mis-copied
+   root category, slot count or column count is cheapest to catch here.
 2. **Pilot.** Fill one product end-to-end with the profile. Only after it passes every assertion, scale.
 3. **Crop / assemble.** Two shapes of intake. `scripts/crop_square.py` turns screenshots into square images
    and refuses two failure modes it has seen in the wild: a crop of a product photo that never rendered
@@ -45,12 +49,20 @@ costs one guided probe, not a code change.
    `total`), then `scripts/reconcile.py` compares plan against shop on name + price + spec structure and prints
    four lists — MISSING / DUPLICATE / PRICE / STRUCTURE — plus a status list for rows that exist but are not
    live, and a count of snapshot rows outside the plan. Exit 1 means the batch is not finished.
+9. **Re-probe.** Back on the same backend later — or the moment the page refuses a submit it used to accept —
+   export a fresh dump and `scripts/diff_probe.py old.json new.json --check-profile profile.json`: added and
+   removed category nodes, required flips, a slot taking fewer images, SKU columns reordered, submit wording.
+   Each line says what it would break. The script refuses two pairings that cannot answer the question:
+   dumps from different boards (unless `--cross-board`, which labels the output as a section difference) and
+   dumps of the same capture. Re-probe, re-derive the profile, re-make the queue — never hand-patch queue rows
+   to fit an outdated profile.
 
 ## Contents
 
 ```
 SKILL.md                        the run, the preflight, the fill loop, the gates
-profile.example.json            what the probe produces (trays, locators, defaults, business policy)
+profile.example.json            what the probe decides (trays, locators, defaults, business policy)
+probe-dump.example.json         what the probe saw (tree, fields, slots, column order, submit wording)
 actual.example.json             what to read off the filled form before the submit gate
 listings.example.json           what the audit reads back from the product list
 products-images.example.json    the plan for laying a product's existing images into the slots
@@ -65,6 +77,7 @@ scripts/make_queue.py           facts + profile → queue
 scripts/fill_xlsx.py            append rows without breaking formulas
 scripts/verify_item.py          the pre-submit gate: per-rule PASS/FAIL/SKIP, exit 1 blocks the submit
 scripts/reconcile.py            plan vs shop: missing / duplicate / price / structure / status
+scripts/diff_probe.py           probe vs probe, profile vs probe: what moved and what each move breaks
 evals/evals.json                test briefs with expected behaviour
 ```
 

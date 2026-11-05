@@ -74,6 +74,32 @@ python ../skills/auto-list-products/scripts/reconcile.py \
     --expected queue.json --listings listings.json --board pickup
 ```
 
+## 导出探测记录给 diff_probe 用
+
+在新建表单页求值 `window.__alpProbeDump('pickup')` 或 `window.__alpProbeDump('express')`，拿到
+`probe-dump.example.json` 那个形状的观察记录：字段（页面必填标记 + 实测"留空会不会拦住提交"）、
+整棵类目树、每个上传槽（`crop/maxCount/bind/optional`）、SKU 列顺序、提交文案、以及从页面事实推导出的观察记录。
+
+- 传进来的板块会被真切过去：导出的 `board` 就是页面上那张表单，不会出现"标签写着 express、内容还是 pickup"。
+  切板块会重渲染，没提交的草稿随之消失（真实后台切换板块也一样）；如果页面已经停在目标板块的新建表单上，
+  导出不会动它，已填的值会作为 `default` 出现在记录里。
+- 导出器自己不写任何字段名、槽位数或比例规则：槽位属性来自控件上的 `data-tray`/`data-crop`/`data-max` 声明，
+  SKU 行的必填判断取自 `collect()` 用的同一张表。改沙盒的表单，导出跟着变。
+- 板块名写错会直接报错，不会给你一份看起来很像的假记录。
+
+存成两份不同时间的文件后：
+
+```bash
+python ../skills/auto-list-products/scripts/diff_probe.py \
+    probe-pickup-1104.json probe-pickup-1111.json --check-profile profile.json
+```
+
+第一次探测没有历史可比，也可以只验"档案抄得对不对"：
+
+```bash
+python ../skills/auto-list-products/scripts/diff_probe.py probe-pickup-1104.json --check-profile profile.json
+```
+
 ## 配合提交前校验练习
 
 表单填完后，把页面回读值按 `skills/auto-list-products/actual.example.json` 的形状 dump 成

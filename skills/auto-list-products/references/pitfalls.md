@@ -202,3 +202,22 @@ Fix: exact trimmed match, panel-scoped reads, and assert the joined path afterwa
 
 Cause: agent-created tab auto-closed at turn end.
 Fix: work in the user's tab and mark it as handoff before pausing.
+
+## The platform moved and a failed listing is how we found out
+
+Cause: `profile.json` records the decisions, not the form. Once the catalogue loses a node, a slot takes
+fewer images, or a column is inserted mid-row, nothing in the profile can tell you - the failure shows up
+as a rejected submit several products later.
+Fix: keep one probe dump per board with its capture time (`probe-dump.example.json`), and diff the new one
+against it: `diff_probe.py old.json new.json --check-profile profile.json`. Re-probe at the start of a
+session on the same backend, after any submit the page refused without explaining, and when a batch behaves
+differently from its pilot. Re-make the queue from the new profile - never hand-patch queue rows to make a
+diff go away.
+
+## A section difference read as platform drift
+
+Cause: the courier probe diffed against the self-pickup probe. The two really do differ - a scope picker one
+of them lacks, an extra column - and that difference is not evidence that anything changed.
+Fix: each board is compared against its own history; `diff_probe.py` refuses the other pairing unless you
+say `--cross-board`. The same refusal covers two dumps carrying the same `capturedAt` (or none at all):
+a pair that cannot be placed in time cannot answer "did the platform change", so it must not report "no drift".

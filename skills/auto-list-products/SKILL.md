@@ -73,7 +73,17 @@ The probe answers four questions by inspecting the live create form:
 Every upload slot on the form becomes one entry in `image.trays`: the product image, the detail images
 (their own tile, often with a different ratio rule), and a per-spec-row image cell when the form has one.
 For each, record `crop` (`square` opens a crop dialog that needs a confirm button, `any` accepts the file
-as-is, `none` means no dialog), `maxCount` and `bind` (`product` or `sku`).
+as-is, `none` means no dialog), `maxCount`, `bind` (`product` or `sku`) and whether an empty slot blocks
+the submit.
+
+**Write down what you saw before you write down what you decided.** The observation goes into a probe dump
+(`probe-dump.example.json`) per board, named with its capture time: the whole category tree node by node,
+every field with the required marker the page shows *and* the behaviour you measured, the slots, the SKU
+column order, the submit wording, and the notes. `profile.json` is derived from it afterwards. The dump
+carries what the profile has no place for - the nodes you did not route anything to, the column order, the
+field that looks optional and is not - and it is the only thing that can later answer
+"did the platform change?". On the practice sandbox `window.__alpProbeDump('pickup')` writes one from the
+live DOM; on a real backend you record the same sections by reading the page.
 
 Then ask the user the business questions the page cannot answer:
 
@@ -85,12 +95,18 @@ Then ask the user the business questions the page cannot answer:
 - any minimum coupon / skip rule (default: none),
 - fill-only or fill-and-submit.
 
-Write `profile.json` (shape: `profile.example.json`), run the validator, then fill **one** product with the
-profile before building a queue:
+Write `profile.json` (shape: `profile.example.json`), run the validator, hold the profile against the dump
+it was derived from, then fill **one** product with the profile before building a queue:
 
 ```bash
 python scripts/check_profile.py profile.json
+python scripts/diff_probe.py probe-pickup-2026-11-04.json --check-profile profile.json
 ```
+
+The second command checks the profile's claims about the form (root category, scope option, SKU column
+count, separator, slot keys and their `maxCount`/`crop`, name length) against what the probe recorded.
+A copy error between observation and profile is the cheapest bug to find and the most expensive one to
+carry into a 500-row batch.
 
 ## Phase 2 — Image intake
 
@@ -231,8 +247,21 @@ A batch is not finished when the last submit returned; it is finished when the s
    **structure** (the case-only / wrong-spec shape that name-only checks hide), **duplicate** (delete the
    extra), plus the **status** list of rows that exist but are not live. Exit code 1 means differences; do
    not call a batch done on a green-looking run that exited 1.
-4. Spot-check hosted images with `scripts/check_images.py --urls`.
-5. Report submitted / skipped / retried / reconciled, and quote the residual diff.
+4. Re-probe and diff, when anything about the form stopped making sense: a submit the page refused without
+   explaining, a batch that behaved differently from its pilot, or the first run of a new working session on
+   the same backend. Export a fresh dump for that board and compare it with the one the profile came from:
+
+   ```bash
+   python scripts/diff_probe.py probe-pickup-2026-10-31.json probe-pickup-2026-11-04.json --check-profile profile.json
+   ```
+
+   Exit 1 here means the platform moved - the category a queue row is routed to may no longer exist, a slot
+   may take fewer images, a column may have been inserted in the middle of the SKU row. Re-read the
+   checklist, re-write the profile, re-make the queue. Do not patch queue rows by hand to make a diff pass.
+   Two dumps of different boards are refused unless you say `--cross-board`, and two dumps of the same
+   capture are refused outright: neither can answer "did the platform change".
+5. Spot-check hosted images with `scripts/check_images.py --urls`.
+6. Report submitted / skipped / retried / reconciled, and quote the residual diff.
 
 `state.json` is a work log, not evidence. Whether a product exists is answered by the snapshot and the
 reconcile, because a submit that failed, an expired session, or a reviewed-and-frozen listing all leave
@@ -241,6 +270,8 @@ reconcile, because a submit that failed, an expired session, or a reviewed-and-f
 ## Safety
 
 - Never invent prices, specs or business rules. Never handle credentials.
+- A probe dump records what the form looks like, never what the session is worth: no cookies, tokens or
+  passwords in it. `diff_probe.py` refuses a dump that carries a key shaped like one.
 - Never bypass uploads, review, rate limits or anti-bot checks with page scripts.
 - Keep the user's tab alive when pausing (mark it as handoff) so a filled form is not lost.
 
@@ -249,6 +280,7 @@ reconcile, because a submit that failed, an expired session, or a reviewed-and-f
 - `profile.example.json` — the profile the probe produces (upload trays, locators, defaults, business policy).
 - `listings.example.json` — the snapshot the audit reads back from the product list.
 - `actual.example.json` — what to read off the filled form before the submit gate runs.
+- `probe-dump.example.json` — what the form looked like when it was probed, before any decision was made.
 - `scripts/check_profile.py` — refuse a half-probed profile before touching products.
 - `scripts/crop_square.py` — square crops, blank + dot guards with `alt_src` fallback, contact sheet.
 - `scripts/prepare_images.py` — lay existing assets into the form's slots: centre crop only, never upscale, never fill a short slot.
@@ -257,6 +289,7 @@ reconcile, because a submit that failed, an expired session, or a reviewed-and-f
 - `scripts/verify_item.py` — the pre-submit gate: one PASS/FAIL/SKIP line per rule, exit 1 blocks the submit.
 - `scripts/fill_xlsx.py` — append rows without breaking formulas.
 - `scripts/reconcile.py` — plan vs shop: missing / duplicate / price / structure, plus status and extras.
+- `scripts/diff_probe.py` — probe vs probe, and profile vs probe: what moved, and what each move breaks.
 - `products-images.example.json` — the plan for assembling assets a product already has.
 - `references/probe-checklist.md` — the discovery procedure behind Phase 1.
 - `references/browser-playbook.md` — uploads, real input events, handoff, window hygiene.

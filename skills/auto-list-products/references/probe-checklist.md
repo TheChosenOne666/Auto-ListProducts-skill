@@ -3,6 +3,12 @@
 One probe per backend. Budget 5–10 minutes with the user present, because the business questions in
 step 9 cannot be answered by the page.
 
+Steps 1–8 are **observation** and their output is `probe-dump.json` (shape: `probe-dump.example.json`),
+one file per section, named with the time you captured it. Step 10 derives `profile.json` from that dump.
+Write the dump first: it is the only artefact that can later tell you the platform moved, and it holds the
+things a profile has no field for - the category nodes nothing was routed to, the column order, the field
+that looks optional but is not.
+
 Work on the **create** form (the empty one), not on an existing product. If the platform autosaves drafts,
 note that and close the form without saving when you finish probing.
 
@@ -25,6 +31,8 @@ note that and close the form without saving when you finish probing.
 Read the form through the accessibility tree / labels, top to bottom. For each field record:
 
 - visible label and whether it is marked required,
+- whether an empty value blocks the submit - that is **measured** (submit once empty and read what the page
+  says), and it is written next to the marker, not instead of it: the pair is the knowledge,
 - the element kind: text input, cascader, select, number stepper, checkbox/switch, rich text, upload tray,
 - **one stable locator**: placeholder text, label text, role+name, or a css class as a last resort,
 - the current default value, if any.
@@ -43,11 +51,16 @@ image cell) record:
 - how many files it takes (`maxCount`) - that count and the crop rule are what `prepare_images.py` lays the
   product's existing assets against, so record them from the form, not from what the catalogue wishes it were,
 - the thumbnail locator (that is where the stored URL is read back) and the delete locator,
+- whether leaving it empty blocks the submit - that is the slot's `optional` flag, and the page does not
+  always say it out loud,
 - whether it accepts the format you produce, or re-encodes it.
 
 ## 4. Category tree
 
 - open the cascader; read the labels **per panel**, one level at a time (a flat read mixes levels),
+- write **every** node you can reach into `categoryTree`, leaves included, including the branches your
+  catalogue does not use: an added or removed node is only visible against a full picture, and a partial
+  dump reads as "nothing changed" the month the platform deletes the node half your queue is routed to,
 - note the separator used when a selection reads back (e.g. `A / B / C`) — the queue writes the assertion
   string with it,
 - note whether a level allows free text or only leaves,
@@ -58,6 +71,8 @@ image cell) record:
 - type a spec name, add one value, then a second value; confirm SKU rows appear in value order,
 - record the locator for the numeric SKU inputs and the **order** of the numbers in a row
   (price, stock, points, barcode, listed toggle …) — that order is what the fill loop indexes against,
+- write the whole header row into `skuColumns` as it renders, label column and image cell included: a row
+  whose columns were reordered is invisible to a field-by-field comparison and fatal to an index-based one,
 - note the label format used for the case row (so the queue can generate it) and the word the platform
   uses for a case (`箱`, `件`, `提` …),
 - note whether a bulk-fill widget exists and when it is unsafe (it overwrites all rows),
@@ -97,13 +112,18 @@ Record the success condition you actually observed.
 
 ## 10. Write and validate
 
-Write `profile.json` (shape: `profile.example.json`), then:
+Save the dump first (`probe-<board>-<date>.json`, one per section), then write `profile.json`
+(shape: `profile.example.json`) as the decisions derived from it, then:
 
 ```bash
 python scripts/check_profile.py profile.json
+python scripts/diff_probe.py probe-pickup-2026-11-04.json --check-profile profile.json
 ```
 
-Fix every `ERR` before proceeding. `WARN` lines are defaults you may override.
+The second command holds the profile against what was actually on the page: the root category you chose,
+the scope option, the number of SKU columns your `skuFieldOrder` counts, the separator, the slot keys and
+their `maxCount`/`crop`, the name length. Fix every `ERR` and every inconsistency before proceeding.
+`WARN` lines are defaults you may override.
 
 ## 11. Pilot one product
 

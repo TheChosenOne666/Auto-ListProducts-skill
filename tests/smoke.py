@@ -1190,6 +1190,331 @@ def test_prepare_images(tmp: Path) -> None:
           "no contact sheet is announced when there is nothing to put on it")
 
 
+def probe_dump(**over):
+    base = {
+        "capturedAt": "2026-11-01T10:00:00+08:00", "board": "pickup",
+        "form": {"newUrl": "https://t/#/new", "listUrl": "https://t/#/list"},
+        "fields": [
+            {"label": "商品名称", "required": True, "kind": "text", "role": "name", "maxLength": 42, "default": "",
+             "locator": {"by": "placeholder", "value": "请输入商品名称"}},
+            {"label": "上架范围", "required": True, "kind": "select", "role": "scope",
+             "options": ["全域自提点", "指定自提点"], "default": "全域自提点"},
+            {"label": "重量(g)", "required": False, "kind": "number", "in": "sku-row",
+             "emptyBlocksSubmit": True, "default": ""}],
+        "categoryTree": {"酒水饮料": {"茶饮料": {"乌龙茶": None}, "汽水": None}, "方便速食": {"泡面": None}},
+        "separator": " / ",
+        "trays": [{"key": "main", "crop": "square", "maxCount": 1, "bind": "product"},
+                  {"key": "detail", "crop": "any", "maxCount": 5, "bind": "product"}],
+        "skuColumns": ["价格", "库存", "积分", "重量(g)", "是否上架"],
+        "submit": {"button": "提交审核", "confirm": "确认提交审核？", "success": "route leaves #/new"},
+        "observations": ["库存预填 10000"]}
+    base.update(over)
+    return base
+
+
+def test_diff_probe(tmp: Path) -> None:
+    folder = tmp / "probe"
+    folder.mkdir(exist_ok=True)
+    tmp = folder
+
+    def dump_file(name: str, doc) -> Path:
+        path = tmp / name
+        path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+        return path
+
+    def diff(old, new, *extra):
+        return subprocess.run([sys.executable, str(SCRIPTS / "diff_probe.py"), str(old), str(new), *extra],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+    base_path = dump_file("a.json", probe_dump())
+    same_path = dump_file("b-same.json", probe_dump(capturedAt="2026-11-04T10:00:00+08:00"))
+    res = diff(base_path, same_path)
+    check(res.returncode == 0 and "no drift" in res.stdout, "two identical probes report no drift")
+    again = diff(base_path, same_path)
+    check(res.stdout == again.stdout, "the same pair produces byte-identical output")
+
+    self_check = dump_file("b-clone.json", probe_dump())
+    res = diff(base_path, self_check)
+    check(res.returncode == 2 and "one capture compared with itself" in res.stderr,
+          "two dumps of the same capturedAt cannot report 'no drift' - that pair proves nothing")
+
+    added = dump_file("b-add.json", probe_dump(
+        categoryTree={"酒水饮料": {"茶饮料": {"乌龙茶": None, "红茶": None}, "汽水": None, "果汁": None},
+                      "方便速食": {"泡面": None}}))
+    res = diff(base_path, added)
+    check(res.returncode == 1 and "+ category 酒水饮料 / 茶饮料 / 红茶" in res.stdout
+          and "+ category 酒水饮料 / 果汁" in res.stdout, "added nodes are reported with their full path")
+
+    removed = dump_file("b-del.json", probe_dump(
+        categoryTree={"酒水饮料": {"茶饮料": {"乌龙茶": None}}, "方便速食": {"泡面": None}}))
+    res = diff(base_path, removed)
+    check(res.returncode == 1 and "- category 酒水饮料 / 汽水" in res.stdout
+          and "category assertion" in res.stdout, "a removed node says which queue items will now fail")
+
+    renamed = dump_file("b-ren.json", probe_dump(
+        categoryTree={"酒水饮料": {"茶饮料": {"乌龙茶": None}, "汽水": None}, "方便速食": {"速食面": None}}))
+    res = diff(base_path, renamed)
+    check("- category 方便速食 / 泡面" in res.stdout and "+ category 方便速食 / 速食面" in res.stdout,
+          "a renamed leaf shows as the removal and the addition it actually is")
+
+    fields = probe_dump(fields=[
+        {"label": "商品名称", "required": True, "kind": "text", "role": "name", "maxLength": 60, "default": "",
+         "locator": {"by": "id", "value": "f-name"}},
+        {"label": "上架范围", "required": False, "kind": "select", "role": "scope",
+         "options": ["全域自提点", "指定自提点", "全部门店"], "default": "指定自提点"},
+        {"label": "重量(g)", "required": True, "kind": "number", "in": "sku-row",
+         "emptyBlocksSubmit": False, "default": ""},
+        {"label": "备注", "required": False, "kind": "text", "default": ""}])
+    fields_path = dump_file("b-fields.json", fields)
+    res = diff(base_path, fields_path)
+    lines = res.stdout
+    check("~ field 商品名称 maxLength 42 -> 60" in lines,
+          "a name length change is reported: the queue cuts names at this number")
+    check("~ field 商品名称 locator" in lines,
+          "a changed attribute that is not in the named list (locator) still surfaces, with the values")
+    check("~ field 上架范围 required marker True -> False" in lines, "a required flip is reported")
+    check("~ field 上架范围 default" in lines and "指定自提点" in lines, "a default change is reported")
+    check("~ field 上架范围 options" in lines and "全部门店" in lines, "an options change is reported")
+    check("~ field 重量(g)@sku-row empty-blocks-submit True -> False" in lines,
+          "a field that no longer blocks submit is reported - the measured behaviour, not the asterisk")
+    check("+ field 备注" in lines, "a new field is reported")
+
+    reordered = dump_file("b-order.json", probe_dump(skuColumns=["价格", "库存", "重量(g)", "积分", "是否上架"]))
+    res = diff(base_path, reordered)
+    check("sku column order" in res.stdout and "off by one column" in res.stdout,
+          "the same columns in a new order are called out as an order change, not as no change")
+    grew = dump_file("b-grow.json", probe_dump(skuColumns=["价格", "库存", "积分", "重量(g)", "体积", "是否上架"]))
+    res = diff(base_path, grew)
+    check("+ sku column 体积" in res.stdout, "a new sku column is reported")
+
+    trays = probe_dump(trays=[{"key": "main", "crop": "square", "maxCount": 5, "bind": "product"},
+                              {"key": "detail", "crop": "any", "maxCount": 5, "bind": "product"},
+                              {"key": "sku", "crop": "square", "maxCount": 1, "bind": "sku"}])
+    trays_path = dump_file("b-trays.json", trays)
+    res = diff(base_path, trays_path)
+    check("~ tray main maxCount 1 -> 5" in res.stdout and "+ upload tray sku" in res.stdout,
+          "slot count changes and new slots are reported")
+
+    submit = dump_file("b-submit.json", probe_dump(submit={"button": "提交", "confirm": "确认提交？",
+                                                           "success": "toast 提交成功"}))
+    res = diff(base_path, submit)
+    check("~ submit button" in res.stdout and "~ submit success" in res.stdout,
+          "submit wording changes are reported, because locators key on them")
+
+    obs = dump_file("b-obs.json", probe_dump(observations=["类目变更后需要刷新页面"]))
+    res = diff(base_path, obs)
+    check("+ observation 类目变更后需要刷新页面" in res.stdout, "new observations surface")
+    check("- observation 库存预填 10000" in res.stdout and "the trap stays on the page" in res.stdout,
+          "a note that disappeared is reported too: deleting the record does not delete the trap")
+
+    express = dump_file("b-express.json", probe_dump(board="express", capturedAt="2026-11-04T10:00:00+08:00",
+                                                     fields=[{"label": "体积", "required": False, "kind": "number",
+                                                              "in": "sku-row", "emptyBlocksSubmit": True}]))
+    res = diff(base_path, express)
+    check(res.returncode == 2 and "each board is compared against its own history" in res.stderr,
+          "a pickup probe against an express probe is refused: that is a section difference, not drift")
+    res = diff(base_path, express, "--cross-board")
+    check(res.returncode == 1 and "--cross-board" in res.stdout and "- field 商品名称" in res.stdout,
+          "--cross-board answers the other question and labels itself while doing it")
+
+    good_profile = {
+        "platform": "t", "form": {"newUrl": "https://t/#/new", "listUrl": "https://t/#/list"},
+        "fields": {"name": {"locator": {"by": "placeholder", "value": "请输入商品名称"}, "maxLength": 42},
+                   "category": {"kind": "cascader", "locator": {"by": "placeholder", "value": "请选择商品类目"},
+                                "expectedSeparator": " / "},
+                   "scope": {"locator": {"by": "css", "value": "#f-scope"}, "value": "全域自提点"},
+                   "spec": {"nameLocator": {"by": "placeholder", "value": "规格名"},
+                            "valueLocator": {"by": "placeholder", "value": "规格值"},
+                            "skuInputsLocator": {"by": "css", "value": ".sku"},
+                            "skuFieldOrder": ["price", "stock", "points", "weight", "listed"],
+                            "caseSkuLabel": "{per}{unit}*箱"},
+                   "submit": {"button": {"by": "role+name", "value": "提交审核"}}},
+        "image": {"minBytes": 50000, "trays": [{"key": "main", "label": "主图", "bind": "product", "crop": "square",
+                                                "maxCount": 1, "uploadTrigger": {"by": "css", "value": "#m"},
+                                                "thumbLocator": {"by": "css", "value": ".t"},
+                                                "removeLocator": {"by": "css", "value": ".r"}},
+                                               {"key": "detail", "label": "详情图", "bind": "product", "crop": "any",
+                                                "maxCount": 5, "uploadTrigger": {"by": "css", "value": "#d"},
+                                                "thumbLocator": {"by": "css", "value": ".t"},
+                                                "removeLocator": {"by": "css", "value": ".r"}}]},
+        "defaults": {"rootCategory": "酒水饮料", "specName": "规格", "stock": 10000, "checkedToStart": []},
+        "business": {"mode": "fill-and-submit", "pointsMode": "none", "minCoupon": 0, "counters": False,
+                     "caseSku": True}}
+    gp = tmp / "profile-good.json"
+    gp.write_text(json.dumps(good_profile, ensure_ascii=False, indent=1), encoding="utf-8")
+    res = diff(base_path, same_path, "--check-profile", gp)
+    check(res.returncode == 0 and "profile matches the probe" in res.stdout,
+          "a profile consistent with the probe passes")
+
+    drifted = json.loads(gp.read_text(encoding="utf-8"))
+    drifted["defaults"]["rootCategory"] = "生鲜"
+    drifted["fields"]["scope"]["value"] = "全域门店"
+    drifted["fields"]["spec"]["skuFieldOrder"] = ["price", "stock"]
+    drifted["fields"]["category"]["expectedSeparator"] = " > "
+    drifted["image"]["trays"][0]["maxCount"] = 9
+    drifted["image"]["trays"].append({"key": "video", "label": "视频", "bind": "product", "crop": "none",
+                                      "maxCount": 1, "uploadTrigger": {"by": "css", "value": "#v"},
+                                      "thumbLocator": {"by": "css", "value": ".t"},
+                                      "removeLocator": {"by": "css", "value": ".r"}})
+    drifted["fields"]["name"]["maxLength"] = 80
+    dp = tmp / "profile-drifted.json"
+    dp.write_text(json.dumps(drifted, ensure_ascii=False, indent=1), encoding="utf-8")
+    res = diff(base_path, same_path, "--check-profile", dp)
+    for expected_line in ("root category '生鲜' is not in", "profile scope '全域门店' is not among",
+                          "skuFieldOrder has 2 entries", "expectedSeparator ' > ' != observed",
+                          "profile tray 'video' was not observed in", "tray main: profile maxCount 9 but observed 1",
+                          "name maxLength 80 but observed 42"):
+        check(expected_line in res.stdout, f"profile consistency names: {expected_line}")
+    check(res.returncode == 1, "an inconsistent profile exits 1")
+
+    # 审查复现的六类误判，逐条钉住
+    misattribution = probe_dump(capturedAt="2026-11-04T12:00:00+08:00", fields=[
+        {"label": "商家编码", "required": False, "kind": "text", "maxLength": 64},
+        {"label": "商品名称", "required": True, "kind": "text", "role": "name", "maxLength": 42},
+        {"label": "上架范围", "required": True, "kind": "select", "role": "scope",
+         "options": ["全域自提点"], "default": "全域自提点"},
+        {"label": "重量(g)", "required": False, "kind": "number", "in": "sku-row",
+         "emptyBlocksSubmit": True, "default": ""}])
+    mp = dump_file("b-misattribute.json", misattribution)
+    res = diff(base_path, mp, "--check-profile", gp)
+    check("profile matches the probe" in res.stdout,
+          "the name rule is checked against the field marked role 'name', not against the first text input "
+          "that happens to carry a maxLength")
+    longer = probe_dump(capturedAt="2026-11-04T12:00:00+08:00", fields=[
+        {"label": "商家编码", "required": False, "kind": "text", "maxLength": 42},
+        {"label": "商品名称", "required": True, "kind": "text", "role": "name", "maxLength": 60},
+        {"label": "上架范围", "required": True, "kind": "select", "role": "scope",
+         "options": ["全域自提点"], "default": "全域自提点"},
+        {"label": "重量(g)", "required": False, "kind": "number", "in": "sku-row",
+         "emptyBlocksSubmit": True, "default": ""}])
+    res = diff(base_path, dump_file("b-longername.json", longer), "--check-profile", gp)
+    check("profile name maxLength 42 but observed 60 on '商品名称'" in res.stdout,
+          "a drifted name limit is attributed to the name field, with its label shown")
+
+    leafroot = json.loads(gp.read_text(encoding="utf-8"))
+    leafroot["defaults"]["rootCategory"] = "泡面"
+    lr = tmp / "profile-leafroot.json"
+    lr.write_text(json.dumps(leafroot, ensure_ascii=False, indent=1), encoding="utf-8")
+    res = diff(base_path, same_path, "--check-profile", lr)
+    check("not as a root" in res.stdout,
+          "a leaf is not a root: matching any label in the tree would let the cascader start a level too low")
+
+    twin = probe_dump(capturedAt="2026-11-01T10:00:00+08:00", fields=[
+        {"label": "商品名称", "required": True, "kind": "text", "role": "name", "maxLength": 42},
+        {"label": "商家编码", "required": False, "kind": "text"},
+        {"label": "商家编码", "required": False, "kind": "text"}])
+    one_twin = probe_dump(capturedAt="2026-11-04T12:00:00+08:00", fields=[
+        {"label": "商品名称", "required": True, "kind": "text", "role": "name", "maxLength": 42},
+        {"label": "商家编码", "required": False, "kind": "text"}])
+    res = diff(dump_file("b-twin.json", twin), dump_file("b-onetwin.json", one_twin))
+    check("- field 商家编码#2" in res.stdout and "more than one control" in res.stdout,
+          "two controls under one label are numbered: losing one is drift, not a no-op overwrite")
+
+    for slot, (label, broken) in enumerate((("skuColumns 混入 dict", {"skuColumns": [{"col": "价格"}, "库存"]}),
+                                            ("字段项是字符串", {"fields": ["商品名称"]}),
+                                            ("observations 写成一句话", {"observations": "重量留空会拦住提交"}),
+                                            ("类目节点写成字符串", {"categoryTree": {"酒水饮料": "茶饮料"}}))):
+        res = diff(base_path, dump_file(f"b-broken-{slot}.json", probe_dump(**broken)))
+        check(res.returncode == 2 and "Traceback" not in res.stderr,
+              f"an unusable dump is refused with a message, not a traceback: {label}")
+
+    undated = {k: v for k, v in probe_dump().items() if k != "capturedAt"}
+    res = diff(dump_file("b-undated-a.json", undated), dump_file("b-undated-b.json", undated))
+    check(res.returncode == 2 and "no capturedAt" in res.stderr,
+          "two undated dumps cannot claim 'no drift': nothing proves they are two moments")
+
+    sectionless = json.loads(gp.read_text(encoding="utf-8"))
+    sectionless["boards"] = {"pickup": {"label": "到店自提", "defaults": {"rootCategory": "酒水饮料"}}}
+    sl = tmp / "profile-otherboard.json"
+    sl.write_text(json.dumps(sectionless, ensure_ascii=False, indent=1), encoding="utf-8")
+    express_before = dump_file("b-express-a.json", probe_dump(board="express",
+                                                              capturedAt="2026-11-01T10:00:00+08:00"))
+    express_after = dump_file("b-express-b.json", probe_dump(board="express",
+                                                             capturedAt="2026-11-04T12:00:00+08:00"))
+    res = diff(express_before, express_after, "--check-profile", sl)
+    check(res.returncode == 1 and "only declares ['pickup']" in res.stdout,
+          "a profile that declares sections but not this one says so instead of silently using the defaults")
+    sectionless["boards"]["express"] = {"label": "快递发货",
+                                        "defaults": {"rootCategory": "不存在的根"},
+                                        "fields": {"name": {"maxLength": 99}}}
+    sl.write_text(json.dumps(sectionless, ensure_ascii=False, indent=1), encoding="utf-8")
+    res = diff(express_before, express_after, "--check-profile", sl)
+    check("root category '不存在的根' is not in" in res.stdout and "name maxLength 99 but observed 42" in res.stdout,
+          "once the section is declared, its own overrides are the ruler that gets checked")
+
+    no_scope_doc = probe_dump(capturedAt="2026-11-04T11:00:00+08:00",
+                              fields=[f for f in probe_dump()["fields"] if f.get("role") != "scope"])
+    no_scope = dump_file("b-noscope.json", no_scope_doc)
+    res = diff(base_path, no_scope, "--check-profile", gp)
+    check("observed no field with role 'scope'" in res.stdout,
+          "a profile that fills a scope the probe never saw is called out, not quietly skipped")
+    boards_prof = json.loads(gp.read_text(encoding="utf-8"))
+    boards_prof["defaults"]["rootCategory"] = "生鲜"
+    boards_prof["fields"]["name"]["maxLength"] = 80
+    boards_prof["fields"]["spec"]["skuFieldOrder"] = ["price", "stock"]
+    boards_prof["fields"]["scope"]["value"] = "全域自提点"
+    boards_prof["boards"] = {"pickup": {"label": "到店自提",
+                                        "defaults": {"rootCategory": "酒水饮料"},
+                                        "fields": {"name": {"maxLength": 42},
+                                                   "spec": {"skuFieldOrder": ["price", "stock", "points",
+                                                                              "weight", "listed"]}}}}
+    bp = tmp / "profile-boards.json"
+    bp.write_text(json.dumps(boards_prof, ensure_ascii=False, indent=1), encoding="utf-8")
+    res = diff(base_path, same_path, "--check-profile", bp)
+    check(res.returncode == 0 and "profile matches the probe" in res.stdout,
+          "a section's own overrides are the ruler for its probe: no false complaint about the top level")
+    boards_prof["boards"]["pickup"]["fields"]["without"] = ["scope"]
+    bp.write_text(json.dumps(boards_prof, ensure_ascii=False, indent=1), encoding="utf-8")
+    res = diff(base_path, no_scope, "--check-profile", bp)
+    check("observed no field with role 'scope'" not in res.stdout,
+          "fields.without is honoured: this section really dropped the field, so its probe has no scope")
+
+    res = diff(base_path, same_path, "--check-profile", gp, "--verbose", "--out", tmp / "drift.json")
+    check("unchanged:" in res.stdout and (tmp / "drift.json").exists(),
+          "--verbose counts what did not change and --out writes the report")
+
+    single = subprocess.run([sys.executable, str(SCRIPTS / "diff_probe.py"), str(same_path),
+                             "--check-profile", str(gp)], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
+    check(single.returncode == 0 and "checking one probe" in single.stdout
+          and "profile matches the probe" in single.stdout,
+          "the first probe has no history to diff against, but it can already be held against the profile")
+    lone = subprocess.run([sys.executable, str(SCRIPTS / "diff_probe.py"), str(same_path)],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+    check(lone.returncode == 2 and "answers nothing" in lone.stderr,
+          "one dump without a profile is refused rather than reported as a clean bill")
+    three = subprocess.run([sys.executable, str(SCRIPTS / "diff_probe.py"), str(base_path), str(base_path),
+                            str(same_path)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    check(three.returncode == 2, "three dumps is a usage error, not a silent choice of two")
+
+    half = tmp / "half.json"
+    half.write_text(json.dumps({"capturedAt": "x", "board": "p"}, ensure_ascii=False), encoding="utf-8")
+    res = diff(base_path, half)
+    check(res.returncode == 2 and "missing sections" in res.stderr, "a dump missing sections is refused")
+    sneaky = probe_dump(**{"fields": [{"label": "商品名称", "required": True, "kind": "text", "maxLength": 42},
+                                      {"adminToken": "abc"}]})
+    sneaky_path = dump_file("sneaky.json", sneaky)
+    res = diff(base_path, sneaky_path)
+    check(res.returncode == 2 and "credential" in res.stderr,
+          "a dump carrying something credential-shaped is refused, not echoed")
+    res = diff(base_path, tmp / "nope.json")
+    check(res.returncode == 2, "a missing dump file is refused")
+
+    source = (SCRIPTS / "diff_probe.py").read_text(encoding="utf-8")
+    check(not any(tok in source for tok in ("urllib", "socket", "requests", "http.client")),
+          "diff_probe compares files only - no network module in the source")
+    example = json.loads((ROOT / "skills" / "auto-list-products" / "probe-dump.example.json").read_text(encoding="utf-8"))
+    check(set(("capturedAt", "board", "fields", "categoryTree", "separator", "trays", "skuColumns", "submit"))
+          <= set(example), "probe-dump.example.json documents every section the script reads")
+    example_path = dump_file("example-as-dump.json", example)
+    example_next = dump_file("example-next.json", {**example, "capturedAt": "2026-12-01T09:00:00+08:00",
+                                                   "observations": list(example.get("observations") or [])
+                                                                   + ["详情页新增一张长图槽"]})
+    res = diff(example_path, example_next)
+    check(res.returncode == 1 and "+ observation 详情页新增一张长图槽" in res.stdout,
+          "the shipped example is a dump the script can actually read and compare, not a picture of one")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -1202,6 +1527,7 @@ def main() -> int:
         test_verify(tmp)
         test_boards(tmp)
         test_prepare_images(tmp)
+        test_diff_probe(tmp)
     if failures:
         print(f"\n{len(failures)} smoke failures:")
         for f in failures:

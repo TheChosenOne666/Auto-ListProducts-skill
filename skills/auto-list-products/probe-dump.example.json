@@ -1,0 +1,65 @@
+{
+  "capturedAt": "2026-01-04T23:10:00+08:00",
+  "board": "pickup",
+  "form": {
+    "newUrl": "https://admin.example.com/store/product-edit/pickup",
+    "listUrl": "https://admin.example.com/store/pickup/product-list"
+  },
+  "fields": [
+    {"label": "商品名称", "required": true, "kind": "text", "role": "name",
+     "locator": {"by": "placeholder", "value": "请输入商品名称"}, "default": "", "maxLength": 42},
+    {"label": "商品类目", "required": true, "kind": "cascader", "role": "category",
+     "locator": {"by": "placeholder", "value": "请选择商品类目"}, "default": ""},
+    {"label": "上架范围", "required": true, "kind": "select", "role": "scope",
+     "locator": {"by": "css", "value": "#f-scope"},
+     "options": ["全域自提点", "指定自提点", "全部门店"], "default": "全域自提点"},
+    {"label": "商家编码", "required": false, "kind": "text",
+     "locator": {"by": "placeholder", "value": "商家编码（可留空）"}, "default": ""},
+    {"label": "规格名", "required": false, "kind": "text", "role": "specName",
+     "locator": {"by": "placeholder", "value": "规格名，如 规格"}, "default": "规格"},
+    {"label": "价格", "required": false, "kind": "number", "in": "sku-row",
+     "emptyBlocksSubmit": true, "default": ""},
+    {"label": "库存", "required": false, "kind": "number", "in": "sku-row",
+     "emptyBlocksSubmit": true, "default": "10000"},
+    {"label": "重量(g)", "required": false, "kind": "number", "in": "sku-row",
+     "emptyBlocksSubmit": true, "default": ""}
+  ],
+  "categoryTree": {
+    "酒水饮料": {"茶饮料": {"乌龙茶": null, "绿茶": null}, "汽水": null, "饮用水": null},
+    "方便速食": {"泡面": null, "八宝粥": null, "速食食品": null},
+    "食品/零食": {"薯片": null, "辣条": null, "食品": null},
+    "日用百货": {"清洁": null}
+  },
+  "separator": " / ",
+  "trays": [
+    {"key": "main", "label": "主图（需 1:1 方图，最多 1 张）", "crop": "square",
+     "maxCount": 1, "accepts": ["jpg", "png"], "bind": "product", "optional": false},
+    {"key": "detail", "label": "详情图（不限比例，可多张）", "crop": "any",
+     "maxCount": 5, "accepts": ["jpg", "png"], "bind": "product", "optional": true},
+    {"key": "sku", "label": "规格图", "crop": "square", "maxCount": 1,
+     "accepts": ["jpg"], "bind": "sku", "optional": true}
+  ],
+  "skuColumns": ["规格值", "价格", "库存", "积分", "重量(g)", "是否上架", "规格图"],
+  "submit": {
+    "button": "提交审核",
+    "confirm": "确认提交审核？提交后进入待审核，审核通过前不会上架。",
+    "success": "route leaves #/new and the row appears in #/list as pending-review"
+  },
+  "observations": [
+    "库存列预填 10000：是断言对象，不是要填的字段",
+    "重量不标必填，但留空会让提交失败",
+    "一级 食品/零食 下有二级 食品，包含匹配会点错",
+    "审核过的商品改不动，只能删除重上"
+  ],
+  "_notes": [
+    "This is what the agent writes after observing the form, BEFORE it derives profile.json from it.",
+    "required is the marker on the page; emptyBlocksSubmit is the measured behaviour. The gap between them is the knowledge worth keeping.",
+    "categoryTree is read panel by panel, leaves included: it is the only thing that can answer 'did the platform add or remove a node'.",
+    "role marks the fields the profile refers to (name, category, scope, specName) so the consistency check never has to guess by label text.",
+    "One dump per board, named with its capture time, so boards can be compared against their own history.",
+    "optional records whether a slot may stay empty; whether 主图 blocks an empty upload is measured by submitting, not read off a label.",
+    "skuColumns lists every header cell in order, including the label column and the image column: filling by index counts all of them.",
+    "diff_probe.py refuses a pair of different boards without --cross-board, and refuses a pair with the same capturedAt - neither can answer 'did the platform change'.",
+    "No credentials, ever: diff_probe.py refuses a dump containing a key that looks like one."
+  ]
+}
